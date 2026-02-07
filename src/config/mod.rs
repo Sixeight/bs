@@ -20,6 +20,40 @@ pub struct RawConfig {
     pub blogs: HashMap<String, BlogConfig>,
 }
 
+impl RawConfig {
+    fn merge(local: RawConfig, global: RawConfig) -> RawConfig {
+        let default = match (local.default, global.default) {
+            (Some(l), Some(g)) => Some(BlogConfig::merge(l, g)),
+            (Some(l), None) => Some(l),
+            (None, Some(g)) => Some(g),
+            (None, None) => None,
+        };
+
+        let mut blogs = global.blogs;
+        for (domain, local_blog) in local.blogs {
+            let merged = match blogs.remove(&domain) {
+                Some(global_blog) => BlogConfig::merge(local_blog, global_blog),
+                None => local_blog,
+            };
+            blogs.insert(domain, merged);
+        }
+
+        RawConfig { default, blogs }
+    }
+}
+
+impl BlogConfig {
+    fn merge(local: BlogConfig, global: BlogConfig) -> BlogConfig {
+        BlogConfig {
+            username: local.username.or(global.username),
+            password: local.password.or(global.password),
+            local_root: local.local_root.or(global.local_root),
+            omit_domain: local.omit_domain.or(global.omit_domain),
+            owner: local.owner.or(global.owner),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Config {
     pub blogs: HashMap<String, ResolvedBlogConfig>,
@@ -36,30 +70,41 @@ pub struct ResolvedBlogConfig {
 
 impl Config {
     pub fn load(workdir: Option<&Path>) -> Result<Self> {
-        let config_path = Self::find_config_path(workdir)?;
-        let content =
-            std::fs::read_to_string(&config_path).context("Failed to read config file")?;
-        let raw: RawConfig =
-            serde_yml::from_str(&content).context("Failed to parse config file")?;
+        let local_path = Self::local_config_path(workdir);
+        let global_path = Self::global_config_path();
+
+        let local = local_path.and_then(|p| Self::read_config(&p));
+        let global = global_path.and_then(|p| Self::read_config(&p));
+
+        let raw = match (local, global) {
+            (Some(l), Some(g)) => RawConfig::merge(l, g),
+            (Some(l), None) => l,
+            (None, Some(g)) => g,
+            (None, None) => {
+                anyhow::bail!(
+                    "Config file not found. Create blogsync.yaml or ~/.config/blogsync/config.yaml"
+                )
+            }
+        };
+
         Self::resolve(raw)
     }
 
-    fn find_config_path(workdir: Option<&Path>) -> Result<PathBuf> {
-        let candidates = vec![
-            workdir.map(|w| w.join("blogsync.yaml")),
-            Some(PathBuf::from("blogsync.yaml")),
-            dirs::config_dir().map(|d| d.join("blogsync").join("config.yaml")),
-        ];
+    fn local_config_path(workdir: Option<&Path>) -> Option<PathBuf> {
+        let path = match workdir {
+            Some(w) => w.join("blogsync.yaml"),
+            None => PathBuf::from("blogsync.yaml"),
+        };
+        if path.exists() { Some(path) } else { None }
+    }
 
-        for candidate in candidates.into_iter().flatten() {
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
+    fn global_config_path() -> Option<PathBuf> {
+        dirs::home_dir().map(|h| h.join(".config").join("blogsync").join("config.yaml"))
+    }
 
-        anyhow::bail!(
-            "Config file not found. Create blogsync.yaml or ~/.config/blogsync/config.yaml"
-        )
+    fn read_config(path: &Path) -> Option<RawConfig> {
+        let content = std::fs::read_to_string(path).ok()?;
+        serde_yml::from_str(&content).ok()
     }
 
     fn resolve(raw: RawConfig) -> Result<Self> {
@@ -345,6 +390,100 @@ blog2.hateblo.jp:
         let blog = config.get_blog("blog.example.com").unwrap();
         // Blog-specific config overrides default
         assert!(!blog.omit_domain);
+    }
+
+    #[test]
+    fn test_merge_raw_configs_local_priority() {
+        let local = RawConfig {
+            default: Some(BlogConfig {
+                username: Some("local_user".to_string()),
+                password: None,
+                local_root: Some(PathBuf::from("/local/root")),
+                omit_domain: None,
+                owner: None,
+            }),
+            blogs: HashMap::from([(
+                "blog.example.com".to_string(),
+                BlogConfig {
+                    username: Some("blog_user".to_string()),
+                    password: Some("blog_pass".to_string()),
+                    local_root: None,
+                    omit_domain: Some(true),
+                    owner: None,
+                },
+            )]),
+        };
+        let global = RawConfig {
+            default: Some(BlogConfig {
+                username: Some("global_user".to_string()),
+                password: Some("global_pass".to_string()),
+                local_root: Some(PathBuf::from("/global/root")),
+                omit_domain: Some(false),
+                owner: Some("global_owner".to_string()),
+            }),
+            blogs: HashMap::from([(
+                "blog.example.com".to_string(),
+                BlogConfig {
+                    username: Some("global_blog_user".to_string()),
+                    password: Some("global_blog_pass".to_string()),
+                    local_root: Some(PathBuf::from("/global/blog")),
+                    omit_domain: Some(false),
+                    owner: Some("global_blog_owner".to_string()),
+                },
+            )]),
+        };
+
+        let merged = RawConfig::merge(local, global);
+
+        // default: local values win, global fills gaps
+        let default = merged.default.unwrap();
+        assert_eq!(default.username.as_deref(), Some("local_user"));
+        assert_eq!(default.password.as_deref(), Some("global_pass"));
+        assert_eq!(default.local_root, Some(PathBuf::from("/local/root")));
+        assert_eq!(default.omit_domain, Some(false)); // global fills
+        assert_eq!(default.owner.as_deref(), Some("global_owner"));
+
+        // blog: local values win, global fills gaps
+        let blog = merged.blogs.get("blog.example.com").unwrap();
+        assert_eq!(blog.username.as_deref(), Some("blog_user"));
+        assert_eq!(blog.password.as_deref(), Some("blog_pass"));
+        assert_eq!(blog.local_root, Some(PathBuf::from("/global/blog"))); // global fills
+        assert!(blog.omit_domain.unwrap()); // local wins
+        assert_eq!(blog.owner.as_deref(), Some("global_blog_owner"));
+    }
+
+    #[test]
+    fn test_merge_raw_configs_global_only_blog() {
+        let local = RawConfig {
+            default: None,
+            blogs: HashMap::new(),
+        };
+        let global = RawConfig {
+            default: None,
+            blogs: HashMap::from([(
+                "global-only.hateblo.jp".to_string(),
+                BlogConfig {
+                    username: Some("user".to_string()),
+                    password: Some("pass".to_string()),
+                    local_root: Some(PathBuf::from("/tmp")),
+                    omit_domain: None,
+                    owner: None,
+                },
+            )]),
+        };
+
+        let merged = RawConfig::merge(local, global);
+        assert!(merged.blogs.contains_key("global-only.hateblo.jp"));
+    }
+
+    #[test]
+    fn test_global_config_path() {
+        let path = Config::global_config_path();
+        if let Some(p) = path {
+            assert!(p.ends_with(".config/blogsync/config.yaml"));
+            // Must NOT be under Library/Application Support on macOS
+            assert!(!p.to_string_lossy().contains("Library/Application Support"));
+        }
     }
 
     #[test]
