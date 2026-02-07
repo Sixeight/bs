@@ -1,0 +1,42 @@
+[package]
+name = "bs"
+version = "0.1.0"
+edition = "2024"
+description = "A fast blogsync-compatible CLI tool for Hatena Blog"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# HTTP client (sync, lightweight)
+ureq = "3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_yml = "0.0.12"
+
+# XML parsing (AtomPub)
+quick-xml = { version = "0.37", features = ["serialize"] }
+
+# WSSE authentication
+sha1 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+
+# Date/time
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# URL parsing
+url = "2"
+
+# Directory utilities
+dirs = "6"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
