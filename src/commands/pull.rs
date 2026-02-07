@@ -1,5 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::collections::HashSet;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::mpsc;
 
+use crate::client::atom;
 use crate::client::HatenaClient;
 use crate::config::Config;
 use crate::entry::LocalEntry;
@@ -13,13 +18,47 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
         blogs.to_vec()
     };
 
+    let (tx, rx) = mpsc::channel::<(PathBuf, LocalEntry)>();
+
+    let writer = std::thread::spawn(move || {
+        let mut created_dirs: HashSet<PathBuf> = HashSet::new();
+        let mut stderr = std::io::BufWriter::new(std::io::stderr());
+        let mut buf = String::with_capacity(8192);
+        for (path, entry) in rx {
+            if let Some(parent) = path.parent() {
+                if created_dirs.insert(parent.to_path_buf()) {
+                    std::fs::create_dir_all(parent)
+                        .context("Failed to create directory")?;
+                }
+            }
+            buf.clear();
+            entry.write_to_string(&mut buf);
+            std::fs::write(&path, &buf)
+                .context("Failed to write entry file")?;
+            let _ = writeln!(stderr, "{}", path.display());
+        }
+        Ok::<(), anyhow::Error>(())
+    });
+
     for blog_domain in &targets {
         let blog_config = config.get_blog(blog_domain)?;
         let client = HatenaClient::new(blog_domain, blog_config);
 
-        let mut page = None;
-        loop {
-            let feed = client.list_entries(page.as_deref())?;
+        let mut prefetched = None;
+        let first_url = client.collection_url();
+        let mut next_page_url = Some(first_url);
+
+        while let Some(url) = next_page_url.take() {
+            let body = match prefetched.take() {
+                Some(handle) => client.await_fetch(handle)?,
+                None => client.get_xml(&url)?,
+            };
+            let feed = atom::parse_feed(&body)?;
+
+            if let Some(ref next) = feed.next_url {
+                prefetched = Some(client.spawn_fetch(next.clone()));
+            }
+            next_page_url = feed.next_url;
 
             for atom_entry in feed.entries {
                 if no_drafts && atom_entry.draft {
@@ -35,16 +74,16 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
                     blog_domain,
                     blog_config.omit_domain,
                 );
-                entry.save(&path)?;
-                eprintln!("{}", path.display());
-            }
-
-            match feed.next_url {
-                Some(next) => page = Some(next),
-                None => break,
+                tx.send((path, entry))
+                    .context("Writer thread terminated unexpectedly")?;
             }
         }
     }
+
+    drop(tx);
+    writer
+        .join()
+        .expect("Writer thread panicked")?;
 
     Ok(())
 }

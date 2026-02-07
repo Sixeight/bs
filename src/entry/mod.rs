@@ -65,8 +65,8 @@ impl LocalEntry {
         })
     }
 
-    pub fn to_string(&self) -> String {
-        let mut out = String::with_capacity(256 + self.body.len());
+    pub fn write_to_string(&self, out: &mut String) {
+        out.reserve(256 + self.body.len());
         out.push_str("---\n");
         out.push_str("Title: ");
         out.push_str(&self.title);
@@ -107,6 +107,11 @@ impl LocalEntry {
         }
         out.push_str("---\n");
         out.push_str(&self.body);
+    }
+
+    pub fn to_string(&self) -> String {
+        let mut out = String::new();
+        self.write_to_string(&mut out);
         out
     }
 
@@ -151,14 +156,10 @@ impl LocalEntry {
         blog_domain: &str,
         omit_domain: bool,
     ) -> PathBuf {
-        let parsed = url::Url::parse(url).ok();
-        let path = parsed
-            .as_ref()
-            .map(|u| u.path().trim_start_matches('/').to_string())
-            .unwrap_or_else(|| "entry/unknown.md".to_string());
+        let path = extract_url_path(url).unwrap_or("entry/unknown.md");
 
         let base = Self::base_dir(local_root, blog_domain, omit_domain);
-        let file_path = base.join(&path);
+        let file_path = base.join(path);
         if file_path.extension().is_none() {
             file_path.with_extension("md")
         } else {
@@ -190,6 +191,14 @@ struct FrontMatter {
     #[serde(default, deserialize_with = "deserialize_draft")]
     draft: Option<bool>,
     custom_path: Option<String>,
+}
+
+fn extract_url_path(url: &str) -> Option<&str> {
+    let after_proto = &url[url.find("://")? + 3..];
+    let path = &after_proto[after_proto.find('/')? + 1..];
+    let path = path.split('?').next().unwrap_or(path);
+    let path = path.split('#').next().unwrap_or(path);
+    if path.is_empty() { None } else { Some(path) }
 }
 
 fn deserialize_draft<'de, D>(deserializer: D) -> std::result::Result<Option<bool>, D::Error>

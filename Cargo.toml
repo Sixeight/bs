@@ -8,8 +8,9 @@ description = "A fast blogsync-compatible CLI tool for Hatena Blog"
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
-# HTTP client (sync, lightweight)
-ureq = "3"
+# HTTP client (HTTP/2, async driven via single-thread runtime)
+reqwest = { version = "0.12", features = ["rustls-tls", "http2", "gzip"], default-features = false }
+tokio = { version = "1", features = ["rt"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

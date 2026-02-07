@@ -2,12 +2,13 @@ pub mod atom;
 pub mod wsse;
 
 use anyhow::{Context, Result};
-use std::io::Read;
+use tokio::task::JoinHandle;
 
 use crate::config::ResolvedBlogConfig;
 
 pub struct HatenaClient {
-    agent: ureq::Agent,
+    client: reqwest::Client,
+    rt: tokio::runtime::Runtime,
     username: String,
     password: String,
     blog_domain: String,
@@ -21,8 +22,26 @@ impl HatenaClient {
             .as_deref()
             .unwrap_or(&config.username)
             .to_string();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to build runtime");
+        let client = {
+            let _guard = rt.enter();
+            reqwest::Client::builder()
+                .http2_adaptive_window(true)
+                .http2_initial_stream_window_size(2 * 1024 * 1024)
+                .http2_initial_connection_window_size(4 * 1024 * 1024)
+                .http2_keep_alive_interval(Some(std::time::Duration::from_secs(20)))
+                .http2_keep_alive_while_idle(true)
+                .tcp_nodelay(true)
+                .pool_max_idle_per_host(1)
+                .build()
+                .expect("Failed to build HTTP client")
+        };
         Self {
-            agent: ureq::Agent::new_with_defaults(),
+            client,
+            rt,
             username: config.username.clone(),
             password: config.password.clone(),
             blog_domain: blog_domain.to_string(),
@@ -30,7 +49,7 @@ impl HatenaClient {
         }
     }
 
-    fn collection_url(&self) -> String {
+    pub fn collection_url(&self) -> String {
         format!(
             "https://blog.hatena.ne.jp/{}/{}/atom/entry",
             self.owner, self.blog_domain
@@ -48,43 +67,58 @@ impl HatenaClient {
         wsse::generate(&self.username, &self.password)
     }
 
-    fn map_ureq_error(err: ureq::Error, action: &str) -> anyhow::Error {
-        match err {
-            ureq::Error::StatusCode(code) => {
-                let msg = match code {
-                    401 => "authentication failed (check username/password)",
-                    403 => "forbidden (check permissions)",
-                    404 => "not found",
-                    _ => "server error",
-                };
-                anyhow::anyhow!("Failed to {}: HTTP {} — {}", action, code, msg)
-            }
-            other => anyhow::anyhow!("Failed to {}: {}", action, other),
+    fn map_error(err: reqwest::Error, action: &str) -> anyhow::Error {
+        if let Some(status) = err.status() {
+            let msg = match status.as_u16() {
+                401 => "authentication failed (check username/password)",
+                403 => "forbidden (check permissions)",
+                404 => "not found",
+                _ => "server error",
+            };
+            anyhow::anyhow!("Failed to {}: HTTP {} — {}", action, status.as_u16(), msg)
+        } else {
+            anyhow::anyhow!("Failed to {}: {}", action, err)
         }
     }
 
-    fn get_xml(&self, url: &str) -> Result<String> {
-        let resp = self
-            .agent
-            .get(url)
-            .header("X-WSSE", &self.wsse_header())
-            .header("Accept", "application/xml")
-            .call()
-            .map_err(|e| Self::map_ureq_error(e, "fetch entries"))?;
-
-        let mut body = String::new();
-        resp.into_body()
-            .as_reader()
-            .read_to_string(&mut body)
-            .context("Failed to read response body")?;
-        Ok(body)
+    pub fn get_xml(&self, url: &str) -> Result<String> {
+        self.rt.block_on(async {
+            self.client
+                .get(url)
+                .header("X-WSSE", self.wsse_header())
+                .header("Accept", "application/xml")
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, "fetch entries"))?
+                .text()
+                .await
+                .context("Failed to read response body")
+        })
     }
 
-    pub fn list_entries(&self, page: Option<&str>) -> Result<atom::Feed> {
-        let default_url = self.collection_url();
-        let url = page.unwrap_or(&default_url);
-        let body = self.get_xml(url)?;
-        atom::parse_feed(&body)
+    pub fn spawn_fetch(&self, url: String) -> JoinHandle<Result<String>> {
+        let client = self.client.clone();
+        let wsse = self.wsse_header();
+        self.rt.spawn(async move {
+            client
+                .get(&url)
+                .header("X-WSSE", wsse)
+                .header("Accept", "application/xml")
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, "fetch entries"))?
+                .text()
+                .await
+                .context("Failed to read response body")
+        })
+    }
+
+    pub fn await_fetch(&self, handle: JoinHandle<Result<String>>) -> Result<String> {
+        self.rt
+            .block_on(handle)
+            .context("Fetch task panicked")?
     }
 
     pub fn get_entry_by_url(&self, url: &str) -> Result<atom::Entry> {
@@ -93,19 +127,20 @@ impl HatenaClient {
     }
 
     fn post_xml(&self, url: &str, entry_xml: &str, action: &str) -> Result<atom::Entry> {
-        let resp = self
-            .agent
-            .post(url)
-            .header("X-WSSE", &self.wsse_header())
-            .header("Content-Type", "application/xml")
-            .send(entry_xml)
-            .map_err(|e| Self::map_ureq_error(e, action))?;
-
-        let mut body = String::new();
-        resp.into_body()
-            .as_reader()
-            .read_to_string(&mut body)
-            .context("Failed to read response body")?;
+        let body = self.rt.block_on(async {
+            self.client
+                .post(url)
+                .header("X-WSSE", self.wsse_header())
+                .header("Content-Type", "application/xml")
+                .body(entry_xml.to_string())
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, action))?
+                .text()
+                .await
+                .context("Failed to read response body")
+        })?;
         atom::parse_entry(&body)
     }
 
@@ -118,28 +153,33 @@ impl HatenaClient {
     }
 
     pub fn update_entry(&self, edit_url: &str, entry_xml: &str) -> Result<atom::Entry> {
-        let resp = self
-            .agent
-            .put(edit_url)
-            .header("X-WSSE", &self.wsse_header())
-            .header("Content-Type", "application/xml")
-            .send(entry_xml)
-            .map_err(|e| Self::map_ureq_error(e, "update entry"))?;
-
-        let mut body = String::new();
-        resp.into_body()
-            .as_reader()
-            .read_to_string(&mut body)
-            .context("Failed to read response body")?;
+        let body = self.rt.block_on(async {
+            self.client
+                .put(edit_url)
+                .header("X-WSSE", self.wsse_header())
+                .header("Content-Type", "application/xml")
+                .body(entry_xml.to_string())
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, "update entry"))?
+                .text()
+                .await
+                .context("Failed to read response body")
+        })?;
         atom::parse_entry(&body)
     }
 
     pub fn delete_entry(&self, edit_url: &str) -> Result<()> {
-        self.agent
-            .delete(edit_url)
-            .header("X-WSSE", &self.wsse_header())
-            .call()
-            .map_err(|e| Self::map_ureq_error(e, "delete entry"))?;
-        Ok(())
+        self.rt.block_on(async {
+            self.client
+                .delete(edit_url)
+                .header("X-WSSE", self.wsse_header())
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, "delete entry"))?;
+            Ok(())
+        })
     }
 }

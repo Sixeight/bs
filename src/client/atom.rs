@@ -152,13 +152,15 @@ pub fn parse_feed(xml: &str) -> Result<Feed> {
                             entry.content = e.unescape().unwrap_or_default().into_owned()
                         }
                         Tag::Updated => {
-                            entry.updated = e.unescape().unwrap_or_default().into_owned()
+                            entry.updated = String::from_utf8(e.into_inner().to_vec())
+                                .unwrap_or_default();
                         }
                         Tag::Published => {
-                            entry.published = e.unescape().unwrap_or_default().into_owned()
+                            entry.published = String::from_utf8(e.into_inner().to_vec())
+                                .unwrap_or_default();
                         }
                         Tag::AppDraft => {
-                            entry.draft = e.unescape().unwrap_or_default().as_ref() == "yes"
+                            entry.draft = e.as_ref() == b"yes";
                         }
                         Tag::AuthorName => {
                             entry.author_name =
