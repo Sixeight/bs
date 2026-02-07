@@ -25,7 +25,7 @@ impl LocalEntry {
             date: entry.updated,
             url: entry.alternate_url,
             edit_url: entry.edit_url,
-            preview_url: None,
+            preview_url: entry.preview_url,
             draft: entry.draft,
             categories: entry.categories,
             custom_path: entry.custom_path,
@@ -76,7 +76,20 @@ impl LocalEntry {
         out.reserve(256 + self.body.len());
         out.push_str("---\n");
         out.push_str("Title: ");
-        out.push_str(&self.title);
+        if needs_yaml_quoting(&self.title) {
+            out.push('\'');
+            // Escape single quotes by doubling them
+            for c in self.title.chars() {
+                if c == '\'' {
+                    out.push_str("''");
+                } else {
+                    out.push(c);
+                }
+            }
+            out.push('\'');
+        } else {
+            out.push_str(&self.title);
+        }
         out.push('\n');
         if !self.categories.is_empty() {
             out.push_str("Category:\n");
@@ -116,7 +129,7 @@ impl LocalEntry {
             out.push_str(custom_path);
             out.push('\n');
         }
-        out.push_str("---\n");
+        out.push_str("---\n\n");
         out.push_str(&self.body);
         if !self.body.is_empty() && !self.body.ends_with('\n') {
             out.push('\n');
@@ -137,6 +150,7 @@ impl LocalEntry {
             published: self.date.clone(),
             edit_url: self.edit_url.clone(),
             alternate_url: self.url.clone(),
+            preview_url: self.preview_url.clone(),
             draft: self.draft,
             categories: self.categories.clone(),
             custom_path: self.custom_path.clone(),
@@ -270,6 +284,29 @@ fn is_date_in_past(date: &str) -> bool {
         return true;
     };
     dt < OffsetDateTime::now_utc()
+}
+
+/// Check if a YAML scalar value needs single-quoting.
+/// Matches Go's YAML marshaler behavior for special characters.
+fn needs_yaml_quoting(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    if s.starts_with(' ') || s.ends_with(' ') || s.starts_with('#') || s.ends_with(':') {
+        return true;
+    }
+    if s.contains('{') || s.contains('}') || s.contains('[') || s.contains(']') {
+        return true;
+    }
+    // # preceded by space triggers quoting
+    if s.contains(" #") {
+        return true;
+    }
+    // : followed by space triggers quoting
+    if s.contains(": ") {
+        return true;
+    }
+    false
 }
 
 fn deserialize_draft<'de, D>(deserializer: D) -> std::result::Result<Option<bool>, D::Error>
@@ -550,6 +587,7 @@ Draft body";
             published: "2024-03-01T12:00:00+09:00".to_string(),
             edit_url: Some("https://blog.hatena.ne.jp/user/blog.example.com/atom/entry/789".to_string()),
             alternate_url: Some("https://blog.example.com/entry/2024/03/01/test".to_string()),
+            preview_url: None,
             draft: true,
             categories: vec!["Tech".to_string()],
             custom_path: None,
@@ -595,7 +633,7 @@ Draft body";
         assert!(!output.contains("Draft:"));
         assert!(!output.contains("Category:"));
         assert!(!output.contains("CustomPath:"));
-        assert!(output.ends_with("---\ncontent\n"));
+        assert!(output.ends_with("---\n\ncontent\n"));
     }
 
     // 14. path_from_url — URL with extension is preserved
@@ -843,6 +881,73 @@ Full body content here.
         };
 
         let output = entry.to_string();
-        assert!(output.ends_with("---\n"));
+        assert!(output.ends_with("---\n\n"));
+    }
+
+    // 25. needs_yaml_quoting — matches Go YAML marshaler behavior
+    #[test]
+    fn test_needs_yaml_quoting() {
+        // Leading/trailing space
+        assert!(needs_yaml_quoting(" leading"));
+        assert!(needs_yaml_quoting("trailing "));
+        // # preceded by space or at start
+        assert!(needs_yaml_quoting("#hashtag"));
+        assert!(needs_yaml_quoting("hello #world"));
+        // # not preceded by space → no quoting
+        assert!(!needs_yaml_quoting("Module#method"));
+        assert!(!needs_yaml_quoting("LiveCoding#8"));
+        // : followed by space or at end
+        assert!(needs_yaml_quoting("Re: something"));
+        assert!(needs_yaml_quoting("key:"));
+        // : not followed by space → no quoting
+        assert!(!needs_yaml_quoting("YAPC::Asia"));
+        assert!(!needs_yaml_quoting("svn:external"));
+        // Braces
+        assert!(needs_yaml_quoting("{foo}"));
+        assert!(needs_yaml_quoting("[bar]"));
+        // Normal strings
+        assert!(!needs_yaml_quoting("Hello World"));
+        assert!(!needs_yaml_quoting(""));
+    }
+
+    // 26. title quoting roundtrip
+    #[test]
+    fn test_title_quoting_roundtrip() {
+        let entry = LocalEntry {
+            title: " leading space".to_string(),
+            date: "2024-01-01".to_string(),
+            url: None,
+            edit_url: None,
+            preview_url: None,
+            draft: false,
+            categories: Vec::new(),
+            custom_path: None,
+            body: "body\n".to_string(),
+        };
+        let output = entry.to_string();
+        assert!(output.contains("Title: ' leading space'"));
+        let parsed = LocalEntry::parse(&output).unwrap();
+        assert_eq!(parsed.title, " leading space");
+    }
+
+    // 27. title with single quotes is escaped
+    #[test]
+    fn test_title_single_quote_escaping() {
+        let entry = LocalEntry {
+            title: "it's a Re: test".to_string(),
+            date: "2024-01-01".to_string(),
+            url: None,
+            edit_url: None,
+            preview_url: None,
+            draft: false,
+            categories: Vec::new(),
+            custom_path: None,
+            body: "body\n".to_string(),
+        };
+        let output = entry.to_string();
+        // : followed by space triggers quoting, ' is doubled
+        assert!(output.contains("Title: 'it''s a Re: test'"));
+        let parsed = LocalEntry::parse(&output).unwrap();
+        assert_eq!(parsed.title, "it's a Re: test");
     }
 }

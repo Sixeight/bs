@@ -16,6 +16,7 @@ pub struct Entry {
     pub published: String,
     pub edit_url: Option<String>,
     pub alternate_url: Option<String>,
+    pub preview_url: Option<String>,
     pub draft: bool,
     pub categories: Vec<String>,
     pub custom_path: Option<String>,
@@ -44,6 +45,7 @@ struct LinkAttrs {
 enum LinkRel {
     Edit,
     Alternate,
+    Preview,
     Next,
     Other,
 }
@@ -57,6 +59,7 @@ fn extract_link_attrs(e: &BytesStart<'_>) -> LinkAttrs {
                 rel = match attr.value.as_ref() {
                     b"edit" => LinkRel::Edit,
                     b"alternate" => LinkRel::Alternate,
+                    b"preview" => LinkRel::Preview,
                     b"next" => LinkRel::Next,
                     _ => LinkRel::Other,
                 };
@@ -80,6 +83,11 @@ fn apply_link(attrs: LinkAttrs, entry: Option<&mut Entry>, next_url: &mut Option
         LinkRel::Alternate => {
             if let Some(e) = entry {
                 e.alternate_url = Some(attrs.href);
+            }
+        }
+        LinkRel::Preview => {
+            if let Some(e) = entry {
+                e.preview_url = Some(attrs.href);
             }
         }
         LinkRel::Next => {
