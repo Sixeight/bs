@@ -31,9 +31,6 @@ time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
 anyhow = "1"
 thiserror = "2"
 
-# URL parsing
-url = "2"
-
 # Directory utilities
 dirs = "6"
 
@@ -41,3 +38,4 @@ dirs = "6"
 lto = true
 codegen-units = 1
 strip = true
+panic = "abort"

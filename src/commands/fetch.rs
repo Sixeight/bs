@@ -33,11 +33,13 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
 }
 
 pub fn extract_blog_domain(edit_url: &str) -> Result<String> {
-    let url = url::Url::parse(edit_url).context("Invalid EditURL")?;
-    let segments: Vec<&str> = url
-        .path_segments()
-        .context("EditURL has no path")?
-        .collect();
+    // EditURL format: https://blog.hatena.ne.jp/{owner}/{blog_domain}/atom/entry/{id}
+    let path = edit_url
+        .find("://")
+        .and_then(|i| edit_url[i + 3..].find('/'))
+        .map(|i| &edit_url[edit_url.find("://").unwrap() + 3 + i + 1..])
+        .context("Invalid EditURL")?;
+    let segments: Vec<&str> = path.split('/').collect();
     if segments.len() >= 2 {
         Ok(segments[1].to_string())
     } else {

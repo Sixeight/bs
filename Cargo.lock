@@ -120,7 +120,6 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
- "url",
 ]
 
 [[package]]
