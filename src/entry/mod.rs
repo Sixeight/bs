@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use time::OffsetDateTime;
+use time::format_description::well_known::Iso8601;
 
 use crate::client::atom;
 
@@ -66,6 +68,11 @@ impl LocalEntry {
     }
 
     pub fn write_to_string(&self, out: &mut String) {
+        let omit_date = self.draft && is_date_in_past(&self.date);
+        let omit_url = self.draft && self.url.as_deref().map_or(false, |u| {
+            is_likely_given_path(extract_url_path(u).unwrap_or(""))
+        });
+
         out.reserve(256 + self.body.len());
         out.push_str("---\n");
         out.push_str("Title: ");
@@ -79,13 +86,17 @@ impl LocalEntry {
                 out.push('\n');
             }
         }
-        out.push_str("Date: ");
-        out.push_str(&self.date);
-        out.push('\n');
-        if let Some(ref url) = self.url {
-            out.push_str("URL: ");
-            out.push_str(url);
+        if !omit_date {
+            out.push_str("Date: ");
+            out.push_str(&self.date);
             out.push('\n');
+        }
+        if !omit_url {
+            if let Some(ref url) = self.url {
+                out.push_str("URL: ");
+                out.push_str(url);
+                out.push('\n');
+            }
         }
         if let Some(ref edit_url) = self.edit_url {
             out.push_str("EditURL: ");
@@ -98,7 +109,7 @@ impl LocalEntry {
             out.push('\n');
         }
         if self.draft {
-            out.push_str("Draft: yes\n");
+            out.push_str("Draft: true\n");
         }
         if let Some(ref custom_path) = self.custom_path {
             out.push_str("CustomPath: ");
@@ -107,6 +118,9 @@ impl LocalEntry {
         }
         out.push_str("---\n");
         out.push_str(&self.body);
+        if !self.body.is_empty() && !self.body.ends_with('\n') {
+            out.push('\n');
+        }
     }
 
     pub fn to_string(&self) -> String {
@@ -139,10 +153,21 @@ impl LocalEntry {
     }
 
     pub fn file_path(&self, local_root: &Path, blog_domain: &str, omit_domain: bool) -> PathBuf {
+        let base = Self::base_dir(local_root, blog_domain, omit_domain);
+
+        // Draft with auto-generated path → _draft/{entryID}.md
+        if self.draft {
+            let url_path = self.url.as_deref().and_then(extract_url_path).unwrap_or("");
+            if is_likely_given_path(url_path) {
+                if let Some(entry_id) = self.edit_url.as_deref().and_then(extract_entry_id) {
+                    return base.join("entry").join("_draft").join(format!("{entry_id}.md"));
+                }
+            }
+        }
+
         if let Some(ref url) = self.url {
             Self::path_from_url(url, local_root, blog_domain, omit_domain)
         } else {
-            let base = Self::base_dir(local_root, blog_domain, omit_domain);
             match self.custom_path {
                 Some(ref cp) => base.join("entry").join(cp.trim_start_matches('/')),
                 None => base.join("entry").join("unknown.md"),
@@ -199,6 +224,52 @@ fn extract_url_path(url: &str) -> Option<&str> {
     let path = path.split('?').next().unwrap_or(path);
     let path = path.split('#').next().unwrap_or(path);
     if path.is_empty() { None } else { Some(path) }
+}
+
+/// Check if the URL path looks like an auto-generated path by Hatena Blog.
+/// Patterns: `entry/YYYY/MM/DD/HHMMSS` or `entry/YYYYMMDD/timestamp`
+fn is_likely_given_path(path: &str) -> bool {
+    let entry_path = path.strip_prefix("entry/").unwrap_or(path);
+    // YYYY/MM/DD/HHMMSS
+    if entry_path.len() >= 13 {
+        let parts: Vec<&str> = entry_path.splitn(5, '/').collect();
+        if parts.len() >= 4
+            && parts[0].len() == 4 && parts[0].bytes().all(|b| b.is_ascii_digit())
+            && parts[1].len() == 2 && parts[1].bytes().all(|b| b.is_ascii_digit())
+            && parts[2].len() == 2 && parts[2].bytes().all(|b| b.is_ascii_digit())
+            && parts[3].bytes().all(|b| b.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    // YYYYMMDD/timestamp
+    {
+        let parts: Vec<&str> = entry_path.splitn(3, '/').collect();
+        if parts.len() >= 2
+            && parts[0].len() == 8 && parts[0].bytes().all(|b| b.is_ascii_digit())
+            && parts[1].bytes().all(|b| b.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Extract entry ID from an EditURL like
+/// `https://blog.hatena.ne.jp/user/blog.example.com/atom/entry/123456`
+fn extract_entry_id(edit_url: &str) -> Option<&str> {
+    edit_url.rsplit('/').next().filter(|s| !s.is_empty())
+}
+
+/// Check if the date string represents a time in the past.
+fn is_date_in_past(date: &str) -> bool {
+    if date.is_empty() {
+        return true;
+    }
+    let Ok(dt) = OffsetDateTime::parse(date, &Iso8601::DEFAULT) else {
+        return true;
+    };
+    dt < OffsetDateTime::now_utc()
 }
 
 fn deserialize_draft<'de, D>(deserializer: D) -> std::result::Result<Option<bool>, D::Error>
@@ -327,7 +398,7 @@ Draft body";
         );
     }
 
-    // 7. to_string() — parse -> to_string -> parse roundtrip
+    // 7. to_string() — parse -> to_string -> parse roundtrip (non-draft)
     #[test]
     fn test_to_string_roundtrip() {
         let entry = LocalEntry {
@@ -338,7 +409,7 @@ Draft body";
                 "https://blog.hatena.ne.jp/user/example.com/atom/entry/456".to_string(),
             ),
             preview_url: Some("https://blog.example.com/preview/456".to_string()),
-            draft: true,
+            draft: false,
             categories: vec!["Rust".to_string(), "CLI".to_string()],
             custom_path: Some("2024/06/15/test".to_string()),
             body: "Content body\n".to_string(),
@@ -357,14 +428,15 @@ Draft body";
         assert_eq!(parsed.custom_path, entry.custom_path);
         assert_eq!(parsed.body, entry.body);
 
-        // Draft: yes should be serialized
-        assert!(serialized.contains("Draft: yes"));
         // Draft line should be omitted when draft=false
-        let non_draft = LocalEntry {
-            draft: false,
+        assert!(!serialized.contains("Draft:"));
+
+        // Draft: true should be serialized
+        let draft_entry = LocalEntry {
+            draft: true,
             ..entry
         };
-        assert!(!non_draft.to_string().contains("Draft:"));
+        assert!(draft_entry.to_string().contains("Draft: true"));
     }
 
     // 8. file_path() — URL-based path generation
@@ -523,7 +595,7 @@ Draft body";
         assert!(!output.contains("Draft:"));
         assert!(!output.contains("Category:"));
         assert!(!output.contains("CustomPath:"));
-        assert!(output.ends_with("---\ncontent"));
+        assert!(output.ends_with("---\ncontent\n"));
     }
 
     // 14. path_from_url — URL with extension is preserved
@@ -541,7 +613,7 @@ Draft body";
         );
     }
 
-    // 15. from_file + save file I/O roundtrip
+    // 15. from_file + save file I/O roundtrip (non-draft preserves all fields)
     #[test]
     fn test_file_io_roundtrip() {
         let dir = std::env::temp_dir().join("bs_test_file_io");
@@ -554,7 +626,7 @@ Draft body";
             url: Some("https://example.com/entry/test".to_string()),
             edit_url: None,
             preview_url: None,
-            draft: true,
+            draft: false,
             categories: vec!["Test".to_string()],
             custom_path: None,
             body: "File content\n".to_string(),
@@ -620,5 +692,157 @@ Full body content here.
         let entry = LocalEntry::parse(content).unwrap();
         assert_eq!(entry.title, "Empty");
         assert_eq!(entry.body, "");
+    }
+
+    // 17. is_likely_given_path — auto-generated path patterns
+    #[test]
+    fn test_is_likely_given_path() {
+        // YYYY/MM/DD/HHMMSS
+        assert!(is_likely_given_path("entry/2024/01/15/120000"));
+        assert!(is_likely_given_path("2024/01/15/120000"));
+        // YYYYMMDD/timestamp
+        assert!(is_likely_given_path("entry/20240115/1705286400"));
+        assert!(is_likely_given_path("20240115/1705286400"));
+        // Custom paths are NOT auto-generated
+        assert!(!is_likely_given_path("entry/2024/01/15/my-post"));
+        assert!(!is_likely_given_path("entry/custom/path"));
+        assert!(!is_likely_given_path("entry/about"));
+    }
+
+    // 18. extract_entry_id
+    #[test]
+    fn test_extract_entry_id() {
+        assert_eq!(
+            extract_entry_id("https://blog.hatena.ne.jp/user/blog.example.com/atom/entry/123456"),
+            Some("123456")
+        );
+        assert_eq!(extract_entry_id("https://example.com/"), None);
+    }
+
+    // 19. file_path — draft with auto-generated path → _draft/{id}.md
+    #[test]
+    fn test_file_path_draft_auto_generated() {
+        let entry = LocalEntry {
+            title: "Draft".to_string(),
+            date: String::new(),
+            url: Some("https://example.com/entry/2024/01/15/120000".to_string()),
+            edit_url: Some(
+                "https://blog.hatena.ne.jp/user/example.com/atom/entry/456789".to_string(),
+            ),
+            preview_url: None,
+            draft: true,
+            categories: Vec::new(),
+            custom_path: None,
+            body: String::new(),
+        };
+
+        let path = entry.file_path(Path::new("/tmp/blog"), "example.com", false);
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/blog/example.com/entry/_draft/456789.md")
+        );
+    }
+
+    // 20. file_path — draft with custom path → normal URL path (not _draft)
+    #[test]
+    fn test_file_path_draft_custom_path() {
+        let entry = LocalEntry {
+            title: "Draft Custom".to_string(),
+            date: String::new(),
+            url: Some("https://example.com/entry/my-post".to_string()),
+            edit_url: Some(
+                "https://blog.hatena.ne.jp/user/example.com/atom/entry/789".to_string(),
+            ),
+            preview_url: None,
+            draft: true,
+            categories: Vec::new(),
+            custom_path: None,
+            body: String::new(),
+        };
+
+        let path = entry.file_path(Path::new("/tmp/blog"), "example.com", false);
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/blog/example.com/entry/my-post.md")
+        );
+    }
+
+    // 21. write_to_string — draft omits Date when past, omits URL when auto-generated
+    #[test]
+    fn test_write_draft_omits_date_and_url() {
+        let entry = LocalEntry {
+            title: "Draft".to_string(),
+            date: "2024-01-01T00:00:00+09:00".to_string(),
+            url: Some("https://example.com/entry/2024/01/01/120000".to_string()),
+            edit_url: Some("https://blog.hatena.ne.jp/user/example.com/atom/entry/123".to_string()),
+            preview_url: None,
+            draft: true,
+            categories: Vec::new(),
+            custom_path: None,
+            body: "body\n".to_string(),
+        };
+
+        let output = entry.to_string();
+        assert!(!output.contains("\nDate:"), "Date should be omitted for draft with past date");
+        assert!(!output.contains("\nURL:"), "URL should be omitted for draft with auto-generated path");
+        assert!(output.contains("Draft: true"));
+    }
+
+    // 22. write_to_string — draft with custom URL preserves URL
+    #[test]
+    fn test_write_draft_preserves_custom_url() {
+        let entry = LocalEntry {
+            title: "Draft".to_string(),
+            date: "2024-01-01T00:00:00+09:00".to_string(),
+            url: Some("https://example.com/entry/my-post".to_string()),
+            edit_url: None,
+            preview_url: None,
+            draft: true,
+            categories: Vec::new(),
+            custom_path: None,
+            body: "body\n".to_string(),
+        };
+
+        let output = entry.to_string();
+        assert!(!output.contains("Date:"), "Date should be omitted for draft with past date");
+        assert!(output.contains("URL: https://example.com/entry/my-post"), "Custom URL should be preserved");
+    }
+
+    // 23. write_to_string — trailing newline guaranteed
+    #[test]
+    fn test_write_trailing_newline() {
+        let entry = LocalEntry {
+            title: "Test".to_string(),
+            date: "2024-01-01".to_string(),
+            url: None,
+            edit_url: None,
+            preview_url: None,
+            draft: false,
+            categories: Vec::new(),
+            custom_path: None,
+            body: "no trailing newline".to_string(),
+        };
+
+        let output = entry.to_string();
+        assert!(output.ends_with("no trailing newline\n"));
+    }
+
+    // 24. write_to_string — empty body does not add extra newline
+    #[test]
+    fn test_write_empty_body_no_extra_newline() {
+        let entry = LocalEntry {
+            title: "Test".to_string(),
+            date: "2024-01-01".to_string(),
+            url: None,
+            edit_url: None,
+            preview_url: None,
+            draft: false,
+            categories: Vec::new(),
+            custom_path: None,
+            body: String::new(),
+        };
+
+        let output = entry.to_string();
+        assert!(output.ends_with("---\n"));
     }
 }

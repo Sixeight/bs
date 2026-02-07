@@ -148,9 +148,10 @@ pub fn parse_feed(xml: &str) -> Result<Feed> {
                         Tag::Title => {
                             entry.title = e.unescape().unwrap_or_default().into_owned()
                         }
-                        Tag::Content | Tag::FormattedContent => {
+                        Tag::Content => {
                             entry.content = e.unescape().unwrap_or_default().into_owned()
                         }
+                        Tag::FormattedContent => {}
                         Tag::Updated => {
                             entry.updated = String::from_utf8(e.into_inner().to_vec())
                                 .unwrap_or_default();
@@ -400,5 +401,22 @@ mod tests {
     fn test_parse_entry_no_entry_returns_error() {
         let xml = r#"<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>"#;
         assert!(parse_entry(xml).is_err());
+    }
+
+    #[test]
+    fn test_formatted_content_ignored() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:hatena="http://www.hatena.ne.jp/info/xmlns#">
+  <entry>
+    <title>Test</title>
+    <content type="text/plain">Original Markdown</content>
+    <hatena:formatted-content type="text/html">&lt;p&gt;Rendered HTML&lt;/p&gt;</hatena:formatted-content>
+    <updated>2024-01-01T00:00:00+09:00</updated>
+    <published>2024-01-01T00:00:00+09:00</published>
+  </entry>
+</feed>"#;
+        let entry = parse_entry(xml).unwrap();
+        assert_eq!(entry.content, "Original Markdown");
     }
 }
