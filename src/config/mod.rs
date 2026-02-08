@@ -141,10 +141,7 @@ impl Config {
                 .context(format!("No local_root configured for {}", domain))?;
             let local_root = expand_tilde(&local_root);
 
-            let omit_domain = blog
-                .omit_domain
-                .or(default.omit_domain)
-                .unwrap_or(false);
+            let omit_domain = blog.omit_domain.or(default.omit_domain).unwrap_or(false);
 
             let owner = blog.owner.or_else(|| default.owner.clone());
 
@@ -167,6 +164,41 @@ impl Config {
         self.blogs
             .get(domain)
             .context(format!("Blog '{}' not found in config", domain))
+    }
+
+    /// Detect which blog a file belongs to by finding the longest matching path prefix.
+    /// Returns (domain, config) for the best match.
+    pub fn detect_blog_from_path(&self, path: &Path) -> Result<(&str, &ResolvedBlogConfig)> {
+        let abs_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .context("Failed to get current directory")?
+                .join(path)
+        };
+
+        let mut best: Option<(&str, &ResolvedBlogConfig, usize)> = None;
+
+        for (domain, config) in &self.blogs {
+            // Try with domain in path
+            let with_domain = config.local_root.join(domain);
+            if abs_path.starts_with(&with_domain) {
+                let len = with_domain.as_os_str().len();
+                if best.as_ref().is_none_or(|(_, _, l)| len > *l) {
+                    best = Some((domain.as_str(), config, len));
+                }
+            }
+            // Try without domain (omit_domain case)
+            if config.omit_domain && abs_path.starts_with(&config.local_root) {
+                let len = config.local_root.as_os_str().len();
+                if best.as_ref().is_none_or(|(_, _, l)| len > *l) {
+                    best = Some((domain.as_str(), config, len));
+                }
+            }
+        }
+
+        best.map(|(d, c, _)| (d, c))
+            .context(format!("No blog config matches path: {}", path.display()))
     }
 }
 
@@ -504,6 +536,73 @@ blog2.hateblo.jp:
 
         let result = Config::resolve(raw);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_detect_blog_from_path() {
+        let config = Config {
+            blogs: HashMap::from([
+                (
+                    "blog1.example.com".to_string(),
+                    ResolvedBlogConfig {
+                        username: "u".to_string(),
+                        password: "p".to_string(),
+                        local_root: PathBuf::from("/tmp/blogs"),
+                        omit_domain: false,
+                        owner: None,
+                    },
+                ),
+                (
+                    "blog2.example.com".to_string(),
+                    ResolvedBlogConfig {
+                        username: "u".to_string(),
+                        password: "p".to_string(),
+                        local_root: PathBuf::from("/tmp/blogs"),
+                        omit_domain: false,
+                        owner: None,
+                    },
+                ),
+            ]),
+        };
+
+        // Matches blog1 via domain prefix
+        let (domain, _) = config
+            .detect_blog_from_path(Path::new(
+                "/tmp/blogs/blog1.example.com/entry/2024/01/01/test.md",
+            ))
+            .unwrap();
+        assert_eq!(domain, "blog1.example.com");
+
+        // Matches blog2 via domain prefix
+        let (domain, _) = config
+            .detect_blog_from_path(Path::new("/tmp/blogs/blog2.example.com/entry/my-post.md"))
+            .unwrap();
+        assert_eq!(domain, "blog2.example.com");
+
+        // No match
+        let result = config.detect_blog_from_path(Path::new("/other/path/file.md"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_detect_blog_from_path_omit_domain() {
+        let config = Config {
+            blogs: HashMap::from([(
+                "blog.example.com".to_string(),
+                ResolvedBlogConfig {
+                    username: "u".to_string(),
+                    password: "p".to_string(),
+                    local_root: PathBuf::from("/tmp/blog"),
+                    omit_domain: true,
+                    owner: None,
+                },
+            )]),
+        };
+
+        let (domain, _) = config
+            .detect_blog_from_path(Path::new("/tmp/blog/entry/2024/01/01/test.md"))
+            .unwrap();
+        assert_eq!(domain, "blog.example.com");
     }
 
     #[test]
