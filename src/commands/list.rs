@@ -12,7 +12,7 @@ pub fn run() -> Result<()> {
 
     for (domain, blog_config) in &blogs {
         println!(
-            "{:<width$}   {}",
+            "{:<width$} {}",
             domain,
             blog_config.local_root.display(),
             width = max_width
