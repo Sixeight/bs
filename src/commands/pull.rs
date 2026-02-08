@@ -31,21 +31,19 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
         let mut stdout = std::io::BufWriter::new(std::io::stdout());
         let mut buf = String::with_capacity(8192);
         let mut spinner = progress::Spinner::new();
-        let mut fetched = 0usize;
-        let mut stored = 0usize;
-        let mut unchanged = 0usize;
+        let mut pulled = 0usize;
+        let mut skipped = 0usize;
 
         for (path, entry) in rx {
             let local_time = entry::local_last_modified(&path);
             if let Ok(remote_time) = OffsetDateTime::parse(&entry.date, &Iso8601::DEFAULT) {
                 if let Some(lt) = local_time {
                     if remote_time <= lt {
-                        fetched += 1;
-                        unchanged += 1;
+                        skipped += 1;
                         if is_tty {
                             progress::status(
                                 &mut spinner,
-                                &format!("{} entries  {} stored  {} unchanged", fetched, stored, unchanged),
+                                &format!("{} pulled  {} skipped", pulled, skipped),
                             );
                         }
                         continue;
@@ -69,12 +67,11 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
                 .context("Failed to write entry file")?;
             entry.set_mtime(&path);
 
-            fetched += 1;
-            stored += 1;
+            pulled += 1;
             if is_tty {
                 progress::status(
                     &mut spinner,
-                    &format!("{} entries  {} stored  {} unchanged", fetched, stored, unchanged),
+                    &format!("{} pulled  {} skipped", pulled, skipped),
                 );
             } else {
                 progress::log_store(&path);
@@ -86,8 +83,8 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
 
         if is_tty {
             progress::finish(&format!(
-                "{} entries  {} stored  {} unchanged",
-                fetched, stored, unchanged
+                "{} pulled  {} skipped",
+                pulled, skipped
             ));
         }
         Ok::<(), anyhow::Error>(())

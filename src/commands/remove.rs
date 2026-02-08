@@ -38,7 +38,7 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
     }
 
     if is_tty {
-        progress::finish(&format!("remove  {} entries deleted", total));
+        progress::finish(&format!("remove  {} deleted", total));
     }
 
     Ok(())

@@ -15,8 +15,8 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
     let stdout_tty = progress::stdout_is_tty();
     let mut spinner = progress::Spinner::new();
     let total = paths.len();
-    let mut stored = 0usize;
-    let mut unchanged = 0usize;
+    let mut pushed = 0usize;
+    let mut skipped = 0usize;
 
     for (i, path) in paths.iter().enumerate() {
         let mut entry = LocalEntry::from_file(path)?;
@@ -40,11 +40,11 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
         if let Ok(remote_time) = OffsetDateTime::parse(&remote_entry.updated, &Iso8601::DEFAULT) {
             if let Some(local_time) = entry::local_last_modified(path) {
                 if local_time <= remote_time {
-                    unchanged += 1;
+                    skipped += 1;
                     if is_tty {
                         progress::status(
                             &mut spinner,
-                            &format!("push  {}/{}  {} stored  {} unchanged", i + 1, total, stored, unchanged),
+                            &format!("push  {}/{}  {} pushed  {} skipped", i + 1, total, pushed, skipped),
                         );
                     }
                     continue;
@@ -64,11 +64,11 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
         );
         result.save(&dest)?;
 
-        stored += 1;
+        pushed += 1;
         if is_tty {
             progress::status(
                 &mut spinner,
-                &format!("push  {}/{}  {} stored  {} unchanged", i + 1, total, stored, unchanged),
+                &format!("push  {}/{}  {} pushed  {} skipped", i + 1, total, pushed, skipped),
             );
         } else {
             progress::log_store(&dest);
@@ -80,8 +80,8 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
 
     if is_tty {
         progress::finish(&format!(
-            "push  {} stored  {} unchanged",
-            stored, unchanged
+            "push  {} pushed  {} skipped",
+            pushed, skipped
         ));
     }
 

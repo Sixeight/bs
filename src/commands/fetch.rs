@@ -14,8 +14,8 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
     let stdout_tty = progress::stdout_is_tty();
     let mut spinner = progress::Spinner::new();
     let total = paths.len();
-    let mut stored = 0usize;
-    let mut unchanged = 0usize;
+    let mut fetched = 0usize;
+    let mut skipped = 0usize;
 
     for (i, path) in paths.iter().enumerate() {
         let entry = LocalEntry::from_file(path)?;
@@ -40,11 +40,11 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
         if let Ok(remote_time) = OffsetDateTime::parse(&updated.date, &Iso8601::DEFAULT) {
             if let Some(lt) = local_time {
                 if remote_time <= lt {
-                    unchanged += 1;
+                    skipped += 1;
                     if is_tty {
                         progress::status(
                             &mut spinner,
-                            &format!("fetch  {}/{}  {} stored  {} unchanged", i + 1, total, stored, unchanged),
+                            &format!("fetch  {}/{}  {} fetched  {} skipped", i + 1, total, fetched, skipped),
                         );
                     }
                     continue;
@@ -58,11 +58,11 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
 
         updated.save(&dest)?;
 
-        stored += 1;
+        fetched += 1;
         if is_tty {
             progress::status(
                 &mut spinner,
-                &format!("fetch  {}/{}  {} stored  {} unchanged", i + 1, total, stored, unchanged),
+                &format!("fetch  {}/{}  {} fetched  {} skipped", i + 1, total, fetched, skipped),
             );
         } else {
             progress::log_store(&dest);
@@ -74,8 +74,8 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
 
     if is_tty {
         progress::finish(&format!(
-            "fetch  {} stored  {} unchanged",
-            stored, unchanged
+            "fetch  {} fetched  {} skipped",
+            fetched, skipped
         ));
     }
 
