@@ -10,6 +10,7 @@ use crate::client::atom;
 use crate::client::HatenaClient;
 use crate::config::Config;
 use crate::entry::{self, LocalEntry};
+use crate::progress;
 
 pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
     let config = Config::load(None)?;
@@ -22,27 +23,38 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
 
     let (tx, rx) = mpsc::channel::<(PathBuf, LocalEntry)>();
 
+    let is_tty = progress::stderr_is_tty();
+    let stdout_tty = progress::stdout_is_tty();
+
     let writer = std::thread::spawn(move || {
         let mut created_dirs: HashSet<PathBuf> = HashSet::new();
         let mut stdout = std::io::BufWriter::new(std::io::stdout());
-        let mut stderr = std::io::BufWriter::new(std::io::stderr());
         let mut buf = String::with_capacity(8192);
+        let mut spinner = progress::Spinner::new();
+        let mut fetched = 0usize;
+        let mut stored = 0usize;
+        let mut unchanged = 0usize;
+
         for (path, entry) in rx {
             let local_time = entry::local_last_modified(&path);
             if let Ok(remote_time) = OffsetDateTime::parse(&entry.date, &Iso8601::DEFAULT) {
                 if let Some(lt) = local_time {
                     if !remote_time.gt(&lt) {
+                        fetched += 1;
+                        unchanged += 1;
+                        if is_tty {
+                            progress::status(
+                                &mut spinner,
+                                &format!("{} entries  {} stored  {} unchanged", fetched, stored, unchanged),
+                            );
+                        }
                         continue;
                     }
                 }
                 let local_str = local_time
                     .and_then(|t| t.format(&Iso8601::DEFAULT).ok())
                     .unwrap_or_default();
-                let _ = writeln!(
-                    stderr,
-                    "{:>10} remote={} > local={}",
-                    "fresh", entry.date, local_str
-                );
+                progress::log_fresh(&entry.date, &local_str);
             }
 
             if let Some(parent) = path.parent() {
@@ -56,8 +68,27 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
             std::fs::write(&path, &buf)
                 .context("Failed to write entry file")?;
             entry.set_mtime(&path);
-            let _ = writeln!(stderr, "{:>10} {}", "store", path.display());
-            let _ = writeln!(stdout, "{}", path.display());
+
+            fetched += 1;
+            stored += 1;
+            if is_tty {
+                progress::status(
+                    &mut spinner,
+                    &format!("{} entries  {} stored  {} unchanged", fetched, stored, unchanged),
+                );
+            } else {
+                progress::log_store(&path);
+            }
+            if !stdout_tty {
+                let _ = writeln!(stdout, "{}", path.display());
+            }
+        }
+
+        if is_tty {
+            progress::finish(&format!(
+                "{} entries  {} stored  {} unchanged",
+                fetched, stored, unchanged
+            ));
         }
         Ok::<(), anyhow::Error>(())
     });

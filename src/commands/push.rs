@@ -6,11 +6,19 @@ use time::format_description::well_known::Iso8601;
 use crate::client::atom;
 use crate::config::Config;
 use crate::entry::{self, LocalEntry};
+use crate::progress;
 
 pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
     let config = Config::load(None)?;
 
-    for path in paths {
+    let is_tty = progress::stderr_is_tty();
+    let stdout_tty = progress::stdout_is_tty();
+    let mut spinner = progress::Spinner::new();
+    let total = paths.len();
+    let mut stored = 0usize;
+    let mut unchanged = 0usize;
+
+    for (i, path) in paths.iter().enumerate() {
         let mut entry = LocalEntry::from_file(path)?;
 
         if publish {
@@ -32,6 +40,13 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
         if let Ok(remote_time) = OffsetDateTime::parse(&remote_entry.updated, &Iso8601::DEFAULT) {
             if let Some(local_time) = entry::local_last_modified(path) {
                 if local_time <= remote_time {
+                    unchanged += 1;
+                    if is_tty {
+                        progress::status(
+                            &mut spinner,
+                            &format!("push  {}/{}  {} stored  {} unchanged", i + 1, total, stored, unchanged),
+                        );
+                    }
                     continue;
                 }
             }
@@ -48,8 +63,26 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
             blog_config.omit_domain,
         );
         result.save(&dest)?;
-        eprintln!("{:>10} {}", "store", dest.display());
-        println!("{}", dest.display());
+
+        stored += 1;
+        if is_tty {
+            progress::status(
+                &mut spinner,
+                &format!("push  {}/{}  {} stored  {} unchanged", i + 1, total, stored, unchanged),
+            );
+        } else {
+            progress::log_store(&dest);
+        }
+        if !stdout_tty {
+            println!("{}", dest.display());
+        }
+    }
+
+    if is_tty {
+        progress::finish(&format!(
+            "push  {} stored  {} unchanged",
+            stored, unchanged
+        ));
     }
 
     Ok(())

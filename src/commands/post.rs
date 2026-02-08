@@ -4,6 +4,7 @@ use std::io::Read;
 use crate::client::atom;
 use crate::config::Config;
 use crate::entry::LocalEntry;
+use crate::progress;
 
 pub fn run(
     blog: &str,
@@ -30,6 +31,14 @@ pub fn run(
         body,
     };
 
+    let is_tty = progress::stderr_is_tty();
+    let stdout_tty = progress::stdout_is_tty();
+    let mut spinner = progress::Spinner::new();
+
+    if is_tty {
+        progress::status(&mut spinner, "post  creating...");
+    }
+
     let client = crate::client::HatenaClient::new(blog, blog_config);
     let atom_entry = entry.to_atom_entry();
     let xml = atom::build_entry_xml(&atom_entry);
@@ -42,8 +51,15 @@ pub fn run(
     let result = LocalEntry::from_atom(created);
     let dest = result.file_path(&blog_config.local_root, blog, blog_config.omit_domain);
     result.save(&dest)?;
-    eprintln!("{:>10} {}", "store", dest.display());
-    println!("{}", dest.display());
+
+    if is_tty {
+        progress::finish(&format!("post  {}", dest.display()));
+    } else {
+        progress::log_store(&dest);
+    }
+    if !stdout_tty {
+        println!("{}", dest.display());
+    }
 
     Ok(())
 }
