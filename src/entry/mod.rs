@@ -241,17 +241,7 @@ pub fn local_last_modified(path: &Path) -> Option<OffsetDateTime> {
 }
 
 fn git_author_date(path: &Path) -> Option<OffsetDateTime> {
-    // Check if file is clean in git
-    let status = Command::new("git")
-        .args(["status", "--porcelain", "--"])
-        .arg(path)
-        .output()
-        .ok()?;
-    if !status.status.success() || !status.stdout.is_empty() {
-        return None;
-    }
-
-    // Get author date in strict ISO 8601
+    // Get author date in strict ISO 8601 (same order as blogsync)
     let output = Command::new("git")
         .args(["log", "-1", "--format=%aI", "--"])
         .arg(path)
@@ -261,6 +251,17 @@ fn git_author_date(path: &Path) -> Option<OffsetDateTime> {
     if date_str.is_empty() {
         return None;
     }
+
+    // Check if file is clean in git (blogsync uses -s)
+    let status = Command::new("git")
+        .args(["status", "-s", "--"])
+        .arg(path)
+        .output()
+        .ok()?;
+    if !status.stdout.is_empty() {
+        return None;
+    }
+
     OffsetDateTime::parse(date_str, &Iso8601::DEFAULT).ok()
 }
 

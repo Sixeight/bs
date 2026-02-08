@@ -9,7 +9,7 @@ use time::format_description::well_known::Iso8601;
 use crate::client::atom;
 use crate::client::HatenaClient;
 use crate::config::Config;
-use crate::entry::LocalEntry;
+use crate::entry::{self, LocalEntry};
 
 pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
     let config = Config::load(None)?;
@@ -31,10 +31,7 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
             // Fresh check: skip if local file is newer than remote
             if path.exists() {
                 if let Ok(remote_time) = OffsetDateTime::parse(&entry.date, &Iso8601::DEFAULT) {
-                    if let Ok(local_time) = std::fs::metadata(&path)
-                        .and_then(|m| m.modified())
-                        .map(OffsetDateTime::from)
-                    {
+                    if let Some(local_time) = entry::local_last_modified(&path) {
                         if remote_time <= local_time {
                             continue;
                         }
