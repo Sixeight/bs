@@ -45,7 +45,7 @@ bs pull --no-drafts                # 下書き除外
 
 ### push
 
-ローカルのエントリをリモートに反映。
+ローカルのエントリをリモートに反映。リモートがローカルより新しいファイルはスキップする。
 
 ```sh
 bs push path/to/entry.md           # 更新
@@ -65,7 +65,7 @@ echo "本文" | bs post blog.example.com --custom-path "my-entry"
 
 ### fetch
 
-ローカルのエントリをリモートの最新版で更新。
+ローカルのエントリをリモートの最新版で更新。ローカルがリモートより新しいファイルはスキップする。
 
 ```sh
 bs fetch path/to/entry.md
