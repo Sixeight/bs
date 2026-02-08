@@ -82,14 +82,17 @@ impl HatenaClient {
     }
 
     pub fn get_xml(&self, url: &str) -> Result<String> {
+        eprintln!("{:>10} ---> {}", "GET", url);
         self.rt.block_on(async {
-            self.client
+            let resp = self.client
                 .get(url)
                 .header("X-WSSE", self.wsse_header())
                 .header("Accept", "application/xml")
                 .send()
                 .await
-                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, "fetch entries"))?;
+            eprintln!("{:>10} <--- {}", resp.status().as_u16(), url);
+            resp.error_for_status()
                 .map_err(|e| Self::map_error(e, "fetch entries"))?
                 .text()
                 .await
@@ -100,14 +103,17 @@ impl HatenaClient {
     pub fn spawn_fetch(&self, url: String) -> JoinHandle<Result<String>> {
         let client = self.client.clone();
         let wsse = self.wsse_header();
+        eprintln!("{:>10} ---> {}", "GET", url);
         self.rt.spawn(async move {
-            client
+            let resp = client
                 .get(&url)
                 .header("X-WSSE", wsse)
                 .header("Accept", "application/xml")
                 .send()
                 .await
-                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, "fetch entries"))?;
+            eprintln!("{:>10} <--- {}", resp.status().as_u16(), url);
+            resp.error_for_status()
                 .map_err(|e| Self::map_error(e, "fetch entries"))?
                 .text()
                 .await
@@ -127,15 +133,18 @@ impl HatenaClient {
     }
 
     fn post_xml(&self, url: &str, entry_xml: &str, action: &str) -> Result<atom::Entry> {
+        eprintln!("{:>10} ---> {}", "POST", url);
         let body = self.rt.block_on(async {
-            self.client
+            let resp = self.client
                 .post(url)
                 .header("X-WSSE", self.wsse_header())
                 .header("Content-Type", "application/xml")
                 .body(entry_xml.to_string())
                 .send()
                 .await
-                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, action))?;
+            eprintln!("{:>10} <--- {}", resp.status().as_u16(), url);
+            resp.error_for_status()
                 .map_err(|e| Self::map_error(e, action))?
                 .text()
                 .await
@@ -153,15 +162,18 @@ impl HatenaClient {
     }
 
     pub fn update_entry(&self, edit_url: &str, entry_xml: &str) -> Result<atom::Entry> {
+        eprintln!("{:>10} ---> {}", "PUT", edit_url);
         let body = self.rt.block_on(async {
-            self.client
+            let resp = self.client
                 .put(edit_url)
                 .header("X-WSSE", self.wsse_header())
                 .header("Content-Type", "application/xml")
                 .body(entry_xml.to_string())
                 .send()
                 .await
-                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, "update entry"))?;
+            eprintln!("{:>10} <--- {}", resp.status().as_u16(), edit_url);
+            resp.error_for_status()
                 .map_err(|e| Self::map_error(e, "update entry"))?
                 .text()
                 .await
@@ -171,13 +183,16 @@ impl HatenaClient {
     }
 
     pub fn delete_entry(&self, edit_url: &str) -> Result<()> {
+        eprintln!("{:>10} ---> {}", "DELETE", edit_url);
         self.rt.block_on(async {
-            self.client
+            let resp = self.client
                 .delete(edit_url)
                 .header("X-WSSE", self.wsse_header())
                 .send()
                 .await
-                .and_then(|r| r.error_for_status())
+                .map_err(|e| Self::map_error(e, "delete entry"))?;
+            eprintln!("{:>10} <--- {}", resp.status().as_u16(), edit_url);
+            resp.error_for_status()
                 .map_err(|e| Self::map_error(e, "delete entry"))?;
             Ok(())
         })

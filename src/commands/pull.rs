@@ -28,21 +28,21 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
         let mut stderr = std::io::BufWriter::new(std::io::stderr());
         let mut buf = String::with_capacity(8192);
         for (path, entry) in rx {
-            // Fresh check: skip if local file is newer than remote
-            if path.exists() {
-                if let Ok(remote_time) = OffsetDateTime::parse(&entry.date, &Iso8601::DEFAULT) {
-                    if let Some(local_time) = entry::local_last_modified(&path) {
-                        if remote_time <= local_time {
-                            continue;
-                        }
-                        let _ = writeln!(
-                            stderr,
-                            "       fresh remote={} > local={}",
-                            entry.date,
-                            local_time.format(&Iso8601::DEFAULT).unwrap_or_default()
-                        );
+            let local_time = entry::local_last_modified(&path);
+            if let Ok(remote_time) = OffsetDateTime::parse(&entry.date, &Iso8601::DEFAULT) {
+                if let Some(lt) = local_time {
+                    if !remote_time.gt(&lt) {
+                        continue;
                     }
                 }
+                let local_str = local_time
+                    .and_then(|t| t.format(&Iso8601::DEFAULT).ok())
+                    .unwrap_or_default();
+                let _ = writeln!(
+                    stderr,
+                    "{:>10} remote={} > local={}",
+                    "fresh", entry.date, local_str
+                );
             }
 
             if let Some(parent) = path.parent() {
@@ -56,7 +56,7 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
             std::fs::write(&path, &buf)
                 .context("Failed to write entry file")?;
             entry.set_mtime(&path);
-            let _ = writeln!(stderr, "       store {}", path.display());
+            let _ = writeln!(stderr, "{:>10} {}", "store", path.display());
             let _ = writeln!(stdout, "{}", path.display());
         }
         Ok::<(), anyhow::Error>(())

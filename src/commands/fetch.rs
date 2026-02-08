@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use time::OffsetDateTime;
+use time::format_description::well_known::Iso8601;
 
 use crate::config::Config;
-use crate::entry::LocalEntry;
+use crate::entry::{self, LocalEntry};
 
 pub fn run(paths: &[PathBuf]) -> Result<()> {
     let config = Config::load(None)?;
@@ -25,8 +27,22 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
             &blog_domain,
             blog_config.omit_domain,
         );
+
+        let local_time = entry::local_last_modified(&dest);
+        if let Ok(remote_time) = OffsetDateTime::parse(&updated.date, &Iso8601::DEFAULT) {
+            if let Some(lt) = local_time {
+                if !remote_time.gt(&lt) {
+                    continue;
+                }
+            }
+            let local_str = local_time
+                .and_then(|t| t.format(&Iso8601::DEFAULT).ok())
+                .unwrap_or_default();
+            eprintln!("{:>10} remote={} > local={}", "fresh", updated.date, local_str);
+        }
+
         updated.save(&dest)?;
-        eprintln!("       store {}", dest.display());
+        eprintln!("{:>10} {}", "store", dest.display());
         println!("{}", dest.display());
     }
 
