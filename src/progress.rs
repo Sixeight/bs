@@ -1,6 +1,8 @@
 use std::io::{IsTerminal, Write};
+use std::time::{Duration, Instant};
 
 const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const SPINNER_INTERVAL: Duration = Duration::from_millis(80);
 
 pub fn stderr_is_tty() -> bool {
     std::io::stderr().is_terminal()
@@ -36,17 +38,24 @@ pub fn log_fresh(remote_date: &str, local_str: &str) {
 
 pub struct Spinner {
     idx: usize,
+    last_tick: Instant,
 }
 
 impl Spinner {
     pub fn new() -> Self {
-        Self { idx: 0 }
+        Self {
+            idx: 0,
+            last_tick: Instant::now(),
+        }
     }
 
     pub fn tick(&mut self) -> char {
-        let c = SPINNER_CHARS[self.idx];
-        self.idx = (self.idx + 1) % SPINNER_CHARS.len();
-        c
+        let now = Instant::now();
+        if now.duration_since(self.last_tick) >= SPINNER_INTERVAL {
+            self.idx = (self.idx + 1) % SPINNER_CHARS.len();
+            self.last_tick = now;
+        }
+        SPINNER_CHARS[self.idx]
     }
 }
 
