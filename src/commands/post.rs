@@ -42,7 +42,8 @@ pub fn run(
     let result = LocalEntry::from_atom(created);
     let dest = result.file_path(&blog_config.local_root, blog, blog_config.omit_domain);
     result.save(&dest)?;
-    eprintln!("{}", dest.display());
+    println!("{}", dest.display());
+    eprintln!("       store {}", dest.display());
 
     Ok(())
 }

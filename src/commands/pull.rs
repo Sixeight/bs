@@ -22,6 +22,7 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
 
     let writer = std::thread::spawn(move || {
         let mut created_dirs: HashSet<PathBuf> = HashSet::new();
+        let mut stdout = std::io::BufWriter::new(std::io::stdout());
         let mut stderr = std::io::BufWriter::new(std::io::stderr());
         let mut buf = String::with_capacity(8192);
         for (path, entry) in rx {
@@ -35,7 +36,8 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
             entry.write_to_string(&mut buf);
             std::fs::write(&path, &buf)
                 .context("Failed to write entry file")?;
-            let _ = writeln!(stderr, "{}", path.display());
+            let _ = writeln!(stdout, "{}", path.display());
+            let _ = writeln!(stderr, "       store {}", path.display());
         }
         Ok::<(), anyhow::Error>(())
     });

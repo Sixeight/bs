@@ -23,7 +23,8 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
 
         std::fs::remove_file(path)
             .with_context(|| format!("Failed to remove local file: {}", path.display()))?;
-        eprintln!("{}", path.display());
+        println!("{}", path.display());
+        eprintln!("      remove {}", path.display());
     }
 
     Ok(())

@@ -26,7 +26,8 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
             blog_config.omit_domain,
         );
         updated.save(&dest)?;
-        eprintln!("{}", dest.display());
+        println!("{}", dest.display());
+        eprintln!("       store {}", dest.display());
     }
 
     Ok(())
