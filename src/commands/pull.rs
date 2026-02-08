@@ -58,6 +58,7 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
             entry.write_to_string(&mut buf);
             std::fs::write(&path, &buf)
                 .context("Failed to write entry file")?;
+            entry.set_mtime(&path);
             let _ = writeln!(stdout, "{}", path.display());
             let _ = writeln!(stderr, "       store {}", path.display());
         }

@@ -211,7 +211,19 @@ impl LocalEntry {
             std::fs::create_dir_all(parent).context("Failed to create directory")?;
         }
         std::fs::write(path, self.to_string()).context("Failed to write entry file")?;
+        self.set_mtime(path);
         Ok(())
+    }
+
+    /// Set file mtime to entry's updated time for accurate fresh checks.
+    pub fn set_mtime(&self, path: &Path) {
+        if let Ok(dt) = OffsetDateTime::parse(&self.date, &Iso8601::DEFAULT) {
+            let times = std::fs::FileTimes::new()
+                .set_modified(std::time::SystemTime::from(dt));
+            if let Ok(file) = std::fs::File::options().write(true).open(path) {
+                let _ = file.set_times(times);
+            }
+        }
     }
 }
 
@@ -930,7 +942,39 @@ Full body content here.
         assert_eq!(parsed.title, " leading space");
     }
 
-    // 27. title with single quotes is escaped
+    // 27. save() sets file mtime to entry's updated time
+    #[test]
+    fn test_save_sets_mtime() {
+        let dir = std::env::temp_dir().join("bs_test_mtime");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let entry = LocalEntry {
+            title: "Mtime Test".to_string(),
+            date: "2024-06-15T10:30:00+09:00".to_string(),
+            url: None,
+            edit_url: None,
+            preview_url: None,
+            draft: false,
+            categories: Vec::new(),
+            custom_path: None,
+            body: "body\n".to_string(),
+        };
+
+        let path = dir.join("mtime_test.md");
+        entry.save(&path).unwrap();
+
+        let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let mtime_dt = OffsetDateTime::from(mtime);
+        let expected = OffsetDateTime::parse("2024-06-15T10:30:00+09:00", &Iso8601::DEFAULT).unwrap();
+        // mtime should match entry date (within 1 second tolerance for filesystem)
+        let diff = (mtime_dt - expected).whole_seconds().abs();
+        assert!(diff <= 1, "ERROR: mtime diff={diff}s, expected <=1s");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 28. title with single quotes is escaped
     #[test]
     fn test_title_single_quote_escaping() {
         let entry = LocalEntry {
