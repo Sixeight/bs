@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use time::OffsetDateTime;
@@ -70,7 +71,7 @@ impl LocalEntry {
 
     pub fn write_to_string(&self, out: &mut String) {
         let omit_date = self.draft && is_date_in_past(&self.date);
-        let omit_url = self.draft && self.url.as_deref().map_or(false, |u| {
+        let omit_url = self.draft && self.url.as_deref().is_some_and(|u| {
             is_likely_given_path(extract_url_path(u).unwrap_or(""))
         });
 
@@ -135,12 +136,6 @@ impl LocalEntry {
         if !self.body.is_empty() && !self.body.ends_with('\n') {
             out.push('\n');
         }
-    }
-
-    pub fn to_string(&self) -> String {
-        let mut out = String::new();
-        self.write_to_string(&mut out);
-        out
     }
 
     pub fn to_atom_entry(&self) -> atom::Entry {
@@ -225,6 +220,14 @@ impl LocalEntry {
                 let _ = file.set_times(times);
             }
         }
+    }
+}
+
+impl fmt::Display for LocalEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut out = String::new();
+        self.write_to_string(&mut out);
+        f.write_str(&out)
     }
 }
 

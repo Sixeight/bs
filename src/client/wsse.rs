@@ -13,7 +13,7 @@ pub fn generate(username: &str, password: &str) -> String {
     let created = now.format(&Iso8601::DEFAULT).expect("Failed to format time");
 
     let mut hasher = Sha1::new();
-    hasher.update(&nonce_bytes);
+    hasher.update(nonce_bytes);
     hasher.update(created.as_bytes());
     hasher.update(password.as_bytes());
     let digest = BASE64.encode(hasher.finalize());
