@@ -24,10 +24,7 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
         let blog_config = config.get_blog(&blog_domain)?;
 
         if is_tty {
-            progress::status(
-                &mut spinner,
-                &format!("remove  {}/{}", i + 1, total),
-            );
+            progress::status(&mut spinner, &format!("remove  {}/{}", i + 1, total));
         }
 
         let client = crate::client::HatenaClient::new(&blog_domain, blog_config);

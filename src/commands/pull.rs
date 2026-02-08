@@ -6,8 +6,8 @@ use std::sync::mpsc;
 use time::OffsetDateTime;
 use time::format_description::well_known::Iso8601;
 
-use crate::client::atom;
 use crate::client::HatenaClient;
+use crate::client::atom;
 use crate::config::Config;
 use crate::entry::{self, LocalEntry};
 use crate::progress;
@@ -57,14 +57,12 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
 
             if let Some(parent) = path.parent() {
                 if created_dirs.insert(parent.to_path_buf()) {
-                    std::fs::create_dir_all(parent)
-                        .context("Failed to create directory")?;
+                    std::fs::create_dir_all(parent).context("Failed to create directory")?;
                 }
             }
             buf.clear();
             entry.write_to_string(&mut buf);
-            std::fs::write(&path, &buf)
-                .context("Failed to write entry file")?;
+            std::fs::write(&path, &buf).context("Failed to write entry file")?;
             entry.set_mtime(&path);
 
             pulled += 1;
@@ -84,7 +82,9 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
         if is_tty {
             progress::finish(&format!(
                 "{} pulled  {} skipped  {} total",
-                pulled, skipped, pulled + skipped
+                pulled,
+                skipped,
+                pulled + skipped
             ));
         }
         Ok::<(), anyhow::Error>(())
@@ -141,9 +141,7 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
     }
 
     drop(tx);
-    writer
-        .join()
-        .expect("Writer thread panicked")?;
+    writer.join().expect("Writer thread panicked")?;
 
     Ok(())
 }

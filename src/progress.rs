@@ -32,7 +32,10 @@ pub fn log_store(path: &std::path::Path) {
 
 pub fn log_fresh(remote_date: &str, local_str: &str) {
     if !stderr_is_tty() {
-        eprintln!("{:>10} remote={} > local={}", "fresh", remote_date, local_str);
+        eprintln!(
+            "{:>10} remote={} > local={}",
+            "fresh", remote_date, local_str
+        );
     }
 }
 

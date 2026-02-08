@@ -141,9 +141,7 @@ impl HatenaClient {
     }
 
     pub fn await_fetch(&self, handle: JoinHandle<Result<String>>) -> Result<String> {
-        self.rt
-            .block_on(handle)
-            .context("Fetch task panicked")?
+        self.rt.block_on(handle).context("Fetch task panicked")?
     }
 
     pub fn get_entry_by_url(&self, url: &str) -> Result<atom::Entry> {
@@ -152,16 +150,31 @@ impl HatenaClient {
 
     pub fn create_entry(&self, entry_xml: &str) -> Result<atom::Entry> {
         let url = self.collection_url();
-        atom::parse_entry(&self.send_request(reqwest::Method::POST, &url, Some(entry_xml), "create entry")?)
+        atom::parse_entry(&self.send_request(
+            reqwest::Method::POST,
+            &url,
+            Some(entry_xml),
+            "create entry",
+        )?)
     }
 
     pub fn create_page(&self, entry_xml: &str) -> Result<atom::Entry> {
         let url = self.page_collection_url();
-        atom::parse_entry(&self.send_request(reqwest::Method::POST, &url, Some(entry_xml), "create page")?)
+        atom::parse_entry(&self.send_request(
+            reqwest::Method::POST,
+            &url,
+            Some(entry_xml),
+            "create page",
+        )?)
     }
 
     pub fn update_entry(&self, edit_url: &str, entry_xml: &str) -> Result<atom::Entry> {
-        atom::parse_entry(&self.send_request(reqwest::Method::PUT, edit_url, Some(entry_xml), "update entry")?)
+        atom::parse_entry(&self.send_request(
+            reqwest::Method::PUT,
+            edit_url,
+            Some(entry_xml),
+            "update entry",
+        )?)
     }
 
     pub fn delete_entry(&self, edit_url: &str) -> Result<()> {

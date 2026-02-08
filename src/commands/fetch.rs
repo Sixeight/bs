@@ -44,7 +44,13 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
                     if is_tty {
                         progress::status(
                             &mut spinner,
-                            &format!("fetch  {}/{}  {} fetched  {} skipped", i + 1, total, fetched, skipped),
+                            &format!(
+                                "fetch  {}/{}  {} fetched  {} skipped",
+                                i + 1,
+                                total,
+                                fetched,
+                                skipped
+                            ),
                         );
                     }
                     continue;
@@ -62,7 +68,13 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
         if is_tty {
             progress::status(
                 &mut spinner,
-                &format!("fetch  {}/{}  {} fetched  {} skipped", i + 1, total, fetched, skipped),
+                &format!(
+                    "fetch  {}/{}  {} fetched  {} skipped",
+                    i + 1,
+                    total,
+                    fetched,
+                    skipped
+                ),
             );
         } else {
             progress::log_store(&dest);
@@ -75,7 +87,9 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
     if is_tty {
         progress::finish(&format!(
             "fetch  {} fetched  {} skipped  {} total",
-            fetched, skipped, fetched + skipped
+            fetched,
+            skipped,
+            fetched + skipped
         ));
     }
 
@@ -91,7 +105,10 @@ pub fn extract_blog_domain(edit_url: &str) -> Result<String> {
         .nth(1)
         .filter(|s| !s.is_empty())
         .map(String::from)
-        .context(format!("Cannot extract blog domain from EditURL: {}", edit_url))
+        .context(format!(
+            "Cannot extract blog domain from EditURL: {}",
+            edit_url
+        ))
 }
 
 #[cfg(test)]

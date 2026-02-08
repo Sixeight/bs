@@ -10,7 +10,9 @@ pub fn generate(username: &str, password: &str) -> String {
     let nonce_base64 = BASE64.encode(nonce_bytes);
 
     let now = OffsetDateTime::now_utc();
-    let created = now.format(&Iso8601::DEFAULT).expect("Failed to format time");
+    let created = now
+        .format(&Iso8601::DEFAULT)
+        .expect("Failed to format time");
 
     let mut hasher = Sha1::new();
     hasher.update(nonce_bytes);
