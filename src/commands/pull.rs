@@ -69,38 +69,48 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
         let blog_config = config.get_blog(blog_domain)?;
         let client = HatenaClient::new(blog_domain, blog_config);
 
-        let mut prefetched = None;
-        let first_url = client.collection_url();
-        let mut next_page_url = Some(first_url);
+        let collection_urls = [client.collection_url(), client.page_collection_url()];
 
-        while let Some(url) = next_page_url.take() {
-            let body = match prefetched.take() {
-                Some(handle) => client.await_fetch(handle)?,
-                None => client.get_xml(&url)?,
-            };
-            let feed = atom::parse_feed(&body)?;
+        for (i, first_url) in collection_urls.into_iter().enumerate() {
+            let mut prefetched = None;
+            let mut next_page_url = Some(first_url);
+            let mut is_first_request = true;
 
-            if let Some(ref next) = feed.next_url {
-                prefetched = Some(client.spawn_fetch(next.clone()));
-            }
-            next_page_url = feed.next_url;
+            while let Some(url) = next_page_url.take() {
+                let body = match prefetched.take() {
+                    Some(handle) => client.await_fetch(handle)?,
+                    None => match client.get_xml(&url) {
+                        Ok(body) => body,
+                        // Page collection may fail for non-pro accounts
+                        Err(_) if i > 0 && is_first_request => break,
+                        Err(e) => return Err(e),
+                    },
+                };
+                is_first_request = false;
+                let feed = atom::parse_feed(&body)?;
 
-            for atom_entry in feed.entries {
-                if no_drafts && atom_entry.draft {
-                    continue;
+                if let Some(ref next) = feed.next_url {
+                    prefetched = Some(client.spawn_fetch(next.clone()));
                 }
-                if only_drafts && !atom_entry.draft {
-                    continue;
-                }
+                next_page_url = feed.next_url;
 
-                let entry = LocalEntry::from_atom(atom_entry);
-                let path = entry.file_path(
-                    &blog_config.local_root,
-                    blog_domain,
-                    blog_config.omit_domain,
-                );
-                tx.send((path, entry))
-                    .context("Writer thread terminated unexpectedly")?;
+                for atom_entry in feed.entries {
+                    if no_drafts && atom_entry.draft {
+                        continue;
+                    }
+                    if only_drafts && !atom_entry.draft {
+                        continue;
+                    }
+
+                    let entry = LocalEntry::from_atom(atom_entry);
+                    let path = entry.file_path(
+                        &blog_config.local_root,
+                        blog_domain,
+                        blog_config.omit_domain,
+                    );
+                    tx.send((path, entry))
+                        .context("Writer thread terminated unexpectedly")?;
+                }
             }
         }
     }

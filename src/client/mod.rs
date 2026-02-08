@@ -56,7 +56,7 @@ impl HatenaClient {
         )
     }
 
-    fn page_collection_url(&self) -> String {
+    pub fn page_collection_url(&self) -> String {
         format!(
             "https://blog.hatena.ne.jp/{}/{}/atom/page",
             self.owner, self.blog_domain
