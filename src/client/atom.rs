@@ -129,9 +129,7 @@ pub fn parse_feed(xml: &str) -> Result<Feed> {
                 b"published" => current_tag = Tag::Published,
                 name if name == b"app:edited" => current_tag = Tag::AppEdited,
                 name if name == b"app:draft" => current_tag = Tag::AppDraft,
-                name if name == b"hatena:formatted-content" => {
-                    current_tag = Tag::FormattedContent
-                }
+                name if name == b"hatena:formatted-content" => current_tag = Tag::FormattedContent,
                 b"name" if in_author => current_tag = Tag::AuthorName,
                 _ => current_tag = Tag::Other,
             },
@@ -156,31 +154,28 @@ pub fn parse_feed(xml: &str) -> Result<Feed> {
             Ok(Event::Text(e)) => {
                 if let Some(ref mut entry) = current_entry {
                     match current_tag {
-                        Tag::Title => {
-                            entry.title = e.unescape().unwrap_or_default().into_owned()
-                        }
+                        Tag::Title => entry.title = e.unescape().unwrap_or_default().into_owned(),
                         Tag::Content => {
                             entry.content = e.unescape().unwrap_or_default().into_owned()
                         }
                         Tag::FormattedContent => {}
                         Tag::Updated => {
-                            entry.updated = String::from_utf8(e.into_inner().to_vec())
-                                .unwrap_or_default();
+                            entry.updated =
+                                String::from_utf8(e.into_inner().to_vec()).unwrap_or_default();
                         }
                         Tag::Published => {
-                            entry.published = String::from_utf8(e.into_inner().to_vec())
-                                .unwrap_or_default();
+                            entry.published =
+                                String::from_utf8(e.into_inner().to_vec()).unwrap_or_default();
                         }
                         Tag::AppEdited => {
-                            entry.edited = String::from_utf8(e.into_inner().to_vec())
-                                .unwrap_or_default();
+                            entry.edited =
+                                String::from_utf8(e.into_inner().to_vec()).unwrap_or_default();
                         }
                         Tag::AppDraft => {
                             entry.draft = e.as_ref() == b"yes";
                         }
                         Tag::AuthorName => {
-                            entry.author_name =
-                                Some(e.unescape().unwrap_or_default().into_owned())
+                            entry.author_name = Some(e.unescape().unwrap_or_default().into_owned())
                         }
                         Tag::None | Tag::Other => {}
                     }
@@ -222,8 +217,6 @@ pub fn parse_entry(xml: &str) -> Result<Entry> {
 }
 
 pub fn build_entry_xml(entry: &Entry) -> String {
-    let draft_value = if entry.draft { "yes" } else { "no" };
-
     let mut xml = String::with_capacity(512 + entry.content.len());
     xml.push_str("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
     xml.push_str("<entry xmlns=\"http://www.w3.org/2005/Atom\"\n");
@@ -232,7 +225,12 @@ pub fn build_entry_xml(entry: &Entry) -> String {
     xml.push_str("  <title>");
     escape_xml_into(&mut xml, &entry.title);
     xml.push_str("</title>\n");
-    xml.push_str("  <content type=\"text/plain\">");
+    if !entry.updated.is_empty() {
+        xml.push_str("  <updated>");
+        escape_xml_into(&mut xml, &entry.updated);
+        xml.push_str("</updated>\n");
+    }
+    xml.push_str("  <content>");
     escape_xml_into(&mut xml, &entry.content);
     xml.push_str("</content>\n");
 
@@ -248,11 +246,12 @@ pub fn build_entry_xml(entry: &Entry) -> String {
         xml.push_str("</hatena:custom-path>\n");
     }
 
-    xml.push_str("  <app:control>\n");
-    xml.push_str("    <app:draft>");
-    xml.push_str(draft_value);
-    xml.push_str("</app:draft>\n");
-    xml.push_str("  </app:control>\n");
+    if entry.draft {
+        xml.push_str("  <app:control>\n");
+        xml.push_str("    <app:draft>yes</app:draft>\n");
+        xml.push_str("    <app:preview>yes</app:preview>\n");
+        xml.push_str("  </app:control>\n");
+    }
     xml.push_str("</entry>");
     xml
 }
@@ -367,8 +366,12 @@ mod tests {
         };
         let xml = build_entry_xml(&entry);
         assert!(xml.contains("<title>My Title</title>"));
-        assert!(xml.contains("<content type=\"text/plain\">Hello</content>"));
-        assert!(xml.contains("<app:draft>no</app:draft>"));
+        assert!(xml.contains("<content>Hello</content>"));
+        assert!(!xml.contains("type=\"text/plain\""));
+        assert!(
+            !xml.contains("<app:control>"),
+            "non-draft should not have app:control"
+        );
         assert!(xml.contains("<category term=\"Rust\" />"));
     }
 
@@ -381,6 +384,27 @@ mod tests {
         };
         let xml = build_entry_xml(&entry);
         assert!(xml.contains("<app:draft>yes</app:draft>"));
+        assert!(xml.contains("<app:preview>yes</app:preview>"));
+        assert!(xml.contains("<app:control>"));
+    }
+
+    #[test]
+    fn test_build_entry_xml_updated() {
+        let entry = Entry {
+            title: "Test".to_string(),
+            updated: "2024-01-01T00:00:00+09:00".to_string(),
+            ..Default::default()
+        };
+        let xml = build_entry_xml(&entry);
+        assert!(xml.contains("<updated>2024-01-01T00:00:00+09:00</updated>"));
+
+        // empty updated → no <updated> element
+        let entry2 = Entry {
+            title: "Test".to_string(),
+            ..Default::default()
+        };
+        let xml2 = build_entry_xml(&entry2);
+        assert!(!xml2.contains("<updated>"));
     }
 
     #[test]
@@ -393,6 +417,8 @@ mod tests {
         let xml = build_entry_xml(&entry);
         assert!(xml.contains("A &amp; B &lt; C"));
         assert!(xml.contains("foo &quot;bar&quot; &apos;baz&apos;"));
+        // content should not have type attribute
+        assert!(!xml.contains("type=\"text/plain\""));
     }
 
     #[test]
