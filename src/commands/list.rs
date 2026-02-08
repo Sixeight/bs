@@ -11,12 +11,12 @@ pub fn run() -> Result<()> {
     let max_width = blogs.iter().map(|(d, _)| d.len()).max().unwrap_or(0);
 
     for (domain, blog_config) in &blogs {
-        println!(
-            "{:<width$} {}",
-            domain,
-            blog_config.local_root.display(),
-            width = max_width
-        );
+        let dir = if blog_config.omit_domain {
+            blog_config.local_root.clone()
+        } else {
+            blog_config.local_root.join(domain)
+        };
+        println!("{:<width$} {}", domain, dir.display(), width = max_width);
     }
 
     Ok(())
