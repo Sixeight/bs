@@ -23,9 +23,14 @@ pub struct LocalEntry {
 
 impl LocalEntry {
     pub fn from_atom(entry: atom::Entry) -> Self {
+        let date = if entry.draft && is_date_in_past(&entry.updated) {
+            String::new()
+        } else {
+            entry.updated
+        };
         Self {
             title: entry.title,
-            date: entry.updated,
+            date,
             edited: entry.edited,
             url: entry.alternate_url,
             edit_url: entry.edit_url,
@@ -74,9 +79,11 @@ impl LocalEntry {
 
     pub fn write_to_string(&self, out: &mut String) {
         let omit_date = self.draft && is_date_in_past(&self.date);
-        let omit_url = self.draft && self.url.as_deref().is_some_and(|u| {
-            is_likely_given_path(extract_url_path(u).unwrap_or(""))
-        });
+        let omit_url = self.draft
+            && self
+                .url
+                .as_deref()
+                .is_some_and(|u| is_likely_given_path(extract_url_path(u).unwrap_or("")));
 
         out.reserve(256 + self.body.len());
         out.push_str("---\n");
@@ -174,7 +181,10 @@ impl LocalEntry {
             let url_path = self.url.as_deref().and_then(extract_url_path).unwrap_or("");
             if is_likely_given_path(url_path) {
                 if let Some(entry_id) = self.edit_url.as_deref().and_then(extract_entry_id) {
-                    return base.join("entry").join("_draft").join(format!("{entry_id}.md"));
+                    return base
+                        .join("entry")
+                        .join("_draft")
+                        .join(format!("{entry_id}.md"));
                 }
             }
         }
@@ -216,10 +226,13 @@ impl LocalEntry {
     }
 
     pub fn set_mtime(&self, path: &Path) {
-        let ts = if self.edited.is_empty() { &self.date } else { &self.edited };
+        let ts = if self.edited.is_empty() {
+            &self.date
+        } else {
+            &self.edited
+        };
         if let Ok(dt) = OffsetDateTime::parse(ts, &Iso8601::DEFAULT) {
-            let times = std::fs::FileTimes::new()
-                .set_modified(std::time::SystemTime::from(dt));
+            let times = std::fs::FileTimes::new().set_modified(std::time::SystemTime::from(dt));
             if let Ok(file) = std::fs::File::options().write(true).open(path) {
                 let _ = file.set_times(times);
             }
@@ -248,6 +261,9 @@ pub fn local_last_modified(path: &Path) -> Option<OffsetDateTime> {
 }
 
 fn git_author_date(path: &Path) -> Option<OffsetDateTime> {
+    // Auto-unshallow if needed so git log has full history
+    unshallow_if_needed();
+
     // Get author date in strict ISO 8601 (same order as blogsync)
     let output = Command::new("git")
         .args(["log", "-1", "--format=%aI", "--"])
@@ -272,6 +288,18 @@ fn git_author_date(path: &Path) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(date_str, &Iso8601::DEFAULT).ok()
 }
 
+fn unshallow_if_needed() {
+    let output = Command::new("git")
+        .args(["rev-parse", "--is-shallow-repository"])
+        .output();
+    if let Ok(output) = output {
+        let val = std::str::from_utf8(&output.stdout).unwrap_or("").trim();
+        if val == "true" {
+            let _ = Command::new("git").args(["fetch", "--unshallow"]).output();
+        }
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct FrontMatter {
@@ -289,7 +317,7 @@ struct FrontMatter {
     custom_path: Option<String>,
 }
 
-fn extract_url_path(url: &str) -> Option<&str> {
+pub fn extract_url_path(url: &str) -> Option<&str> {
     let after_proto = &url[url.find("://")? + 3..];
     let path = &after_proto[after_proto.find('/')? + 1..];
     let path = path.split('?').next().unwrap_or(path);
@@ -298,17 +326,24 @@ fn extract_url_path(url: &str) -> Option<&str> {
 }
 
 /// Check if the URL path looks like an auto-generated path by Hatena Blog.
-/// Patterns: `entry/YYYY/MM/DD/HHMMSS` or `entry/YYYYMMDD/timestamp`
-fn is_likely_given_path(path: &str) -> bool {
+/// Patterns:
+/// - `entry/YYYY/MM/DD/HHMMSS` (digits only)
+/// - `entry/YYYYMMDD/timestamp`
+/// - `entry/YYYY/MM/DD/anything` (Go's titlePathReg: `2[01]\d{2}/[01]\d/[0-3]\d/.+`)
+pub fn is_likely_given_path(path: &str) -> bool {
     let entry_path = path.strip_prefix("entry/").unwrap_or(path);
-    // YYYY/MM/DD/HHMMSS
+    // YYYY/MM/DD/something (covers both digit-only HHMMSS and title-based paths)
+    // Matches Go's titlePathReg: 2[01]\d{2}/[01]\d/[0-3]\d/.+
     if entry_path.len() >= 13 {
         let parts: Vec<&str> = entry_path.splitn(5, '/').collect();
         if parts.len() >= 4
-            && parts[0].len() == 4 && parts[0].bytes().all(|b| b.is_ascii_digit())
-            && parts[1].len() == 2 && parts[1].bytes().all(|b| b.is_ascii_digit())
-            && parts[2].len() == 2 && parts[2].bytes().all(|b| b.is_ascii_digit())
-            && parts[3].bytes().all(|b| b.is_ascii_digit())
+            && parts[0].len() == 4
+            && parts[0].bytes().all(|b| b.is_ascii_digit())
+            && parts[1].len() == 2
+            && parts[1].bytes().all(|b| b.is_ascii_digit())
+            && parts[2].len() == 2
+            && parts[2].bytes().all(|b| b.is_ascii_digit())
+            && !parts[3].is_empty()
         {
             return true;
         }
@@ -317,7 +352,8 @@ fn is_likely_given_path(path: &str) -> bool {
     {
         let parts: Vec<&str> = entry_path.splitn(3, '/').collect();
         if parts.len() >= 2
-            && parts[0].len() == 8 && parts[0].bytes().all(|b| b.is_ascii_digit())
+            && parts[0].len() == 8
+            && parts[0].bytes().all(|b| b.is_ascii_digit())
             && parts[1].bytes().all(|b| b.is_ascii_digit())
         {
             return true;
@@ -500,9 +536,7 @@ Draft body";
             date: "2024-06-15T10:30:00+09:00".to_string(),
             edited: String::new(),
             url: Some("https://example.com/entry/2024/06/15/test".to_string()),
-            edit_url: Some(
-                "https://blog.hatena.ne.jp/user/example.com/atom/entry/456".to_string(),
-            ),
+            edit_url: Some("https://blog.hatena.ne.jp/user/example.com/atom/entry/456".to_string()),
             preview_url: Some("https://blog.example.com/preview/456".to_string()),
             draft: false,
             categories: vec!["Rust".to_string(), "CLI".to_string()],
@@ -616,10 +650,7 @@ Draft body";
 
         // omit_domain=true: domain is omitted from path
         let path = entry.file_path(Path::new("/tmp/blog"), "example.com", true);
-        assert_eq!(
-            path,
-            PathBuf::from("/tmp/blog/entry/2024/01/01/test.md")
-        );
+        assert_eq!(path, PathBuf::from("/tmp/blog/entry/2024/01/01/test.md"));
     }
 
     // 11. Draft: YES/Yes — case insensitive
@@ -638,7 +669,7 @@ Draft body";
         }
     }
 
-    // 12. from_atom -> to_atom_entry roundtrip
+    // 12. from_atom -> to_atom_entry roundtrip (non-draft preserves date)
     #[test]
     fn test_atom_roundtrip() {
         let atom_entry = crate::client::atom::Entry {
@@ -647,10 +678,12 @@ Draft body";
             updated: "2024-03-01T12:00:00+09:00".to_string(),
             published: "2024-03-01T12:00:00+09:00".to_string(),
             edited: "2024-03-01T12:00:00+09:00".to_string(),
-            edit_url: Some("https://blog.hatena.ne.jp/user/blog.example.com/atom/entry/789".to_string()),
+            edit_url: Some(
+                "https://blog.hatena.ne.jp/user/blog.example.com/atom/entry/789".to_string(),
+            ),
             alternate_url: Some("https://blog.example.com/entry/2024/03/01/test".to_string()),
             preview_url: None,
-            draft: true,
+            draft: false,
             categories: vec!["Tech".to_string()],
             custom_path: None,
             author_name: Some("testuser".to_string()),
@@ -659,7 +692,8 @@ Draft body";
         let local = LocalEntry::from_atom(atom_entry.clone());
         assert_eq!(local.title, "Atom Test");
         assert_eq!(local.body, "Atom body\n");
-        assert!(local.draft);
+        assert!(!local.draft);
+        assert_eq!(local.date, "2024-03-01T12:00:00+09:00");
         assert_eq!(local.categories, vec!["Tech"]);
 
         let back = local.to_atom_entry();
@@ -669,6 +703,27 @@ Draft body";
         assert_eq!(back.categories, atom_entry.categories);
         assert_eq!(back.edit_url, atom_entry.edit_url);
         assert_eq!(back.alternate_url, atom_entry.alternate_url);
+    }
+
+    // 12b. from_atom clears past date for drafts
+    #[test]
+    fn test_from_atom_draft_clears_past_date() {
+        let atom_entry = crate::client::atom::Entry {
+            title: "Draft".to_string(),
+            content: "body".to_string(),
+            updated: "2024-01-01T00:00:00+09:00".to_string(),
+            published: "2024-01-01T00:00:00+09:00".to_string(),
+            edited: "2024-01-01T00:00:00+09:00".to_string(),
+            draft: true,
+            ..Default::default()
+        };
+
+        let local = LocalEntry::from_atom(atom_entry);
+        assert!(local.draft);
+        assert!(
+            local.date.is_empty(),
+            "draft with past date should have empty date"
+        );
     }
 
     // 13. to_string() — minimal entry (no optional fields)
@@ -805,8 +860,10 @@ Full body content here.
         // YYYYMMDD/timestamp
         assert!(is_likely_given_path("entry/20240115/1705286400"));
         assert!(is_likely_given_path("20240115/1705286400"));
+        // YYYY/MM/DD/title — Go's titlePathReg matches this
+        assert!(is_likely_given_path("entry/2024/01/15/my-post"));
+        assert!(is_likely_given_path("2024/01/15/my-post"));
         // Custom paths are NOT auto-generated
-        assert!(!is_likely_given_path("entry/2024/01/15/my-post"));
         assert!(!is_likely_given_path("entry/custom/path"));
         assert!(!is_likely_given_path("entry/about"));
     }
@@ -854,9 +911,7 @@ Full body content here.
             date: String::new(),
             edited: String::new(),
             url: Some("https://example.com/entry/my-post".to_string()),
-            edit_url: Some(
-                "https://blog.hatena.ne.jp/user/example.com/atom/entry/789".to_string(),
-            ),
+            edit_url: Some("https://blog.hatena.ne.jp/user/example.com/atom/entry/789".to_string()),
             preview_url: None,
             draft: true,
             categories: Vec::new(),
@@ -888,8 +943,14 @@ Full body content here.
         };
 
         let output = entry.to_string();
-        assert!(!output.contains("\nDate:"), "Date should be omitted for draft with past date");
-        assert!(!output.contains("\nURL:"), "URL should be omitted for draft with auto-generated path");
+        assert!(
+            !output.contains("\nDate:"),
+            "Date should be omitted for draft with past date"
+        );
+        assert!(
+            !output.contains("\nURL:"),
+            "URL should be omitted for draft with auto-generated path"
+        );
         assert!(output.contains("Draft: true"));
     }
 
@@ -910,8 +971,14 @@ Full body content here.
         };
 
         let output = entry.to_string();
-        assert!(!output.contains("Date:"), "Date should be omitted for draft with past date");
-        assert!(output.contains("URL: https://example.com/entry/my-post"), "Custom URL should be preserved");
+        assert!(
+            !output.contains("Date:"),
+            "Date should be omitted for draft with past date"
+        );
+        assert!(
+            output.contains("URL: https://example.com/entry/my-post"),
+            "Custom URL should be preserved"
+        );
     }
 
     // 23. write_to_string — trailing newline guaranteed
@@ -1026,7 +1093,8 @@ Full body content here.
 
         let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
         let mtime_dt = OffsetDateTime::from(mtime);
-        let expected = OffsetDateTime::parse("2024-06-15T10:30:00+09:00", &Iso8601::DEFAULT).unwrap();
+        let expected =
+            OffsetDateTime::parse("2024-06-15T10:30:00+09:00", &Iso8601::DEFAULT).unwrap();
         // mtime should match entry date (within 1 second tolerance for filesystem)
         let diff = (mtime_dt - expected).whole_seconds().abs();
         assert!(diff <= 1, "ERROR: mtime diff={diff}s, expected <=1s");
@@ -1040,7 +1108,10 @@ Full body content here.
         // This test runs inside the bs git repo, so Cargo.toml is tracked and clean
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
         let result = local_last_modified(&path);
-        assert!(result.is_some(), "ERROR: should return a timestamp for tracked file");
+        assert!(
+            result.is_some(),
+            "ERROR: should return a timestamp for tracked file"
+        );
     }
 
     // 29. local_last_modified falls back to mtime for untracked files
