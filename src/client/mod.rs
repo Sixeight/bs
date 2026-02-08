@@ -82,23 +82,41 @@ impl HatenaClient {
         }
     }
 
-    pub fn get_xml(&self, url: &str) -> Result<String> {
-        progress::log_http_request("GET", url);
+    fn send_request(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        body: Option<&str>,
+        action: &str,
+    ) -> Result<String> {
+        progress::log_http_request(method.as_str(), url);
         self.rt.block_on(async {
-            let resp = self.client
-                .get(url)
-                .header("X-WSSE", self.wsse_header())
-                .header("Accept", "application/xml")
+            let mut builder = self
+                .client
+                .request(method, url)
+                .header("X-WSSE", self.wsse_header());
+            if let Some(body) = body {
+                builder = builder
+                    .header("Content-Type", "application/xml")
+                    .body(body.to_string());
+            } else {
+                builder = builder.header("Accept", "application/xml");
+            }
+            let resp = builder
                 .send()
                 .await
-                .map_err(|e| Self::map_error(e, "fetch entries"))?;
+                .map_err(|e| Self::map_error(e, action))?;
             progress::log_http_response(resp.status().as_u16(), url);
             resp.error_for_status()
-                .map_err(|e| Self::map_error(e, "fetch entries"))?
+                .map_err(|e| Self::map_error(e, action))?
                 .text()
                 .await
                 .context("Failed to read response body")
         })
+    }
+
+    pub fn get_xml(&self, url: &str) -> Result<String> {
+        self.send_request(reqwest::Method::GET, url, None, "fetch entries")
     }
 
     pub fn spawn_fetch(&self, url: String) -> JoinHandle<Result<String>> {
@@ -129,73 +147,25 @@ impl HatenaClient {
     }
 
     pub fn get_entry_by_url(&self, url: &str) -> Result<atom::Entry> {
-        let body = self.get_xml(url)?;
-        atom::parse_entry(&body)
-    }
-
-    fn post_xml(&self, url: &str, entry_xml: &str, action: &str) -> Result<atom::Entry> {
-        progress::log_http_request("POST", url);
-        let body = self.rt.block_on(async {
-            let resp = self.client
-                .post(url)
-                .header("X-WSSE", self.wsse_header())
-                .header("Content-Type", "application/xml")
-                .body(entry_xml.to_string())
-                .send()
-                .await
-                .map_err(|e| Self::map_error(e, action))?;
-            progress::log_http_response(resp.status().as_u16(), url);
-            resp.error_for_status()
-                .map_err(|e| Self::map_error(e, action))?
-                .text()
-                .await
-                .context("Failed to read response body")
-        })?;
-        atom::parse_entry(&body)
+        atom::parse_entry(&self.get_xml(url)?)
     }
 
     pub fn create_entry(&self, entry_xml: &str) -> Result<atom::Entry> {
-        self.post_xml(&self.collection_url(), entry_xml, "create entry")
+        let url = self.collection_url();
+        atom::parse_entry(&self.send_request(reqwest::Method::POST, &url, Some(entry_xml), "create entry")?)
     }
 
     pub fn create_page(&self, entry_xml: &str) -> Result<atom::Entry> {
-        self.post_xml(&self.page_collection_url(), entry_xml, "create page")
+        let url = self.page_collection_url();
+        atom::parse_entry(&self.send_request(reqwest::Method::POST, &url, Some(entry_xml), "create page")?)
     }
 
     pub fn update_entry(&self, edit_url: &str, entry_xml: &str) -> Result<atom::Entry> {
-        progress::log_http_request("PUT", edit_url);
-        let body = self.rt.block_on(async {
-            let resp = self.client
-                .put(edit_url)
-                .header("X-WSSE", self.wsse_header())
-                .header("Content-Type", "application/xml")
-                .body(entry_xml.to_string())
-                .send()
-                .await
-                .map_err(|e| Self::map_error(e, "update entry"))?;
-            progress::log_http_response(resp.status().as_u16(), edit_url);
-            resp.error_for_status()
-                .map_err(|e| Self::map_error(e, "update entry"))?
-                .text()
-                .await
-                .context("Failed to read response body")
-        })?;
-        atom::parse_entry(&body)
+        atom::parse_entry(&self.send_request(reqwest::Method::PUT, edit_url, Some(entry_xml), "update entry")?)
     }
 
     pub fn delete_entry(&self, edit_url: &str) -> Result<()> {
-        progress::log_http_request("DELETE", edit_url);
-        self.rt.block_on(async {
-            let resp = self.client
-                .delete(edit_url)
-                .header("X-WSSE", self.wsse_header())
-                .send()
-                .await
-                .map_err(|e| Self::map_error(e, "delete entry"))?;
-            progress::log_http_response(resp.status().as_u16(), edit_url);
-            resp.error_for_status()
-                .map_err(|e| Self::map_error(e, "delete entry"))?;
-            Ok(())
-        })
+        self.send_request(reqwest::Method::DELETE, edit_url, None, "delete entry")?;
+        Ok(())
     }
 }

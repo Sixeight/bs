@@ -39,7 +39,7 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
             let local_time = entry::local_last_modified(&path);
             if let Ok(remote_time) = OffsetDateTime::parse(&entry.date, &Iso8601::DEFAULT) {
                 if let Some(lt) = local_time {
-                    if !remote_time.gt(&lt) {
+                    if remote_time <= lt {
                         fetched += 1;
                         unchanged += 1;
                         if is_tty {

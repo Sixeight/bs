@@ -39,7 +39,7 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
         let local_time = entry::local_last_modified(&dest);
         if let Ok(remote_time) = OffsetDateTime::parse(&updated.date, &Iso8601::DEFAULT) {
             if let Some(lt) = local_time {
-                if !remote_time.gt(&lt) {
+                if remote_time <= lt {
                     unchanged += 1;
                     if is_tty {
                         progress::status(
@@ -85,16 +85,13 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
 pub fn extract_blog_domain(edit_url: &str) -> Result<String> {
     // EditURL format: https://blog.hatena.ne.jp/{owner}/{blog_domain}/atom/entry/{id}
     let path = edit_url
-        .find("://")
-        .and_then(|i| edit_url[i + 3..].find('/'))
-        .map(|i| &edit_url[edit_url.find("://").unwrap() + 3 + i + 1..])
-        .context("Invalid EditURL")?;
-    let segments: Vec<&str> = path.split('/').collect();
-    if segments.len() >= 2 {
-        Ok(segments[1].to_string())
-    } else {
-        anyhow::bail!("Cannot extract blog domain from EditURL: {}", edit_url)
-    }
+        .strip_prefix("https://blog.hatena.ne.jp/")
+        .context(format!("Invalid EditURL: {}", edit_url))?;
+    path.split('/')
+        .nth(1)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .context(format!("Cannot extract blog domain from EditURL: {}", edit_url))
 }
 
 #[cfg(test)]
