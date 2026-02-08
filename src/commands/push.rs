@@ -5,7 +5,7 @@ use time::format_description::well_known::Iso8601;
 
 use crate::client::atom;
 use crate::config::Config;
-use crate::entry::LocalEntry;
+use crate::entry::{self, LocalEntry};
 
 pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
     let config = Config::load(None)?;
@@ -30,10 +30,7 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
         // Fresh check: only push if local is newer than remote
         let remote_entry = client.get_entry_by_url(edit_url)?;
         if let Ok(remote_time) = OffsetDateTime::parse(&remote_entry.updated, &Iso8601::DEFAULT) {
-            if let Ok(local_time) = std::fs::metadata(path)
-                .and_then(|m| m.modified())
-                .map(OffsetDateTime::from)
-            {
+            if let Some(local_time) = entry::local_last_modified(path) {
                 if local_time <= remote_time {
                     continue;
                 }

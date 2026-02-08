@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use time::OffsetDateTime;
 use time::format_description::well_known::Iso8601;
 
@@ -225,6 +226,42 @@ impl LocalEntry {
             }
         }
     }
+}
+
+/// Get the local modification time for a file.
+/// Prefers git author date when the file is tracked and clean,
+/// falling back to file mtime.
+pub fn local_last_modified(path: &Path) -> Option<OffsetDateTime> {
+    git_author_date(path).or_else(|| {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .map(OffsetDateTime::from)
+    })
+}
+
+fn git_author_date(path: &Path) -> Option<OffsetDateTime> {
+    // Check if file is clean in git
+    let status = Command::new("git")
+        .args(["status", "--porcelain", "--"])
+        .arg(path)
+        .output()
+        .ok()?;
+    if !status.status.success() || !status.stdout.is_empty() {
+        return None;
+    }
+
+    // Get author date in strict ISO 8601
+    let output = Command::new("git")
+        .args(["log", "-1", "--format=%aI", "--"])
+        .arg(path)
+        .output()
+        .ok()?;
+    let date_str = std::str::from_utf8(&output.stdout).ok()?.trim();
+    if date_str.is_empty() {
+        return None;
+    }
+    OffsetDateTime::parse(date_str, &Iso8601::DEFAULT).ok()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -974,7 +1011,32 @@ Full body content here.
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // 28. title with single quotes is escaped
+    // 28. local_last_modified returns git author date for tracked clean files
+    #[test]
+    fn test_local_last_modified_tracked_file() {
+        // This test runs inside the bs git repo, so Cargo.toml is tracked and clean
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let result = local_last_modified(&path);
+        assert!(result.is_some(), "ERROR: should return a timestamp for tracked file");
+    }
+
+    // 29. local_last_modified falls back to mtime for untracked files
+    #[test]
+    fn test_local_last_modified_untracked_file() {
+        let dir = std::env::temp_dir().join("bs_test_git_date");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let path = dir.join("untracked.txt");
+        std::fs::write(&path, "test").unwrap();
+
+        let result = local_last_modified(&path);
+        assert!(result.is_some(), "ERROR: should fall back to mtime");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // 30. title with single quotes is escaped
     #[test]
     fn test_title_single_quote_escaping() {
         let entry = LocalEntry {
