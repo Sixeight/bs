@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use time::OffsetDateTime;
+use time::format_description::well_known::Iso8601;
 
 use crate::client::atom;
 use crate::config::Config;
@@ -24,6 +26,20 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
         let blog_config = config.get_blog(&blog_domain)?;
 
         let client = crate::client::HatenaClient::new(&blog_domain, blog_config);
+
+        // Fresh check: only push if local is newer than remote
+        let remote_entry = client.get_entry_by_url(edit_url)?;
+        if let Ok(remote_time) = OffsetDateTime::parse(&remote_entry.updated, &Iso8601::DEFAULT) {
+            if let Ok(local_time) = std::fs::metadata(path)
+                .and_then(|m| m.modified())
+                .map(OffsetDateTime::from)
+            {
+                if local_time <= remote_time {
+                    continue;
+                }
+            }
+        }
+
         let atom_entry = entry.to_atom_entry();
         let xml = atom::build_entry_xml(&atom_entry);
         let updated = client.update_entry(edit_url, &xml)?;
