@@ -80,8 +80,8 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
 
     if is_tty {
         progress::finish(&format!(
-            "push  {} pushed  {} skipped",
-            pushed, skipped
+            "push  {} pushed  {} skipped  {} total",
+            pushed, skipped, pushed + skipped
         ));
     }
 

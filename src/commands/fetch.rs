@@ -74,8 +74,8 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
 
     if is_tty {
         progress::finish(&format!(
-            "fetch  {} fetched  {} skipped",
-            fetched, skipped
+            "fetch  {} fetched  {} skipped  {} total",
+            fetched, skipped, fetched + skipped
         ));
     }
 

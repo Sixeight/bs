@@ -83,8 +83,8 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
 
         if is_tty {
             progress::finish(&format!(
-                "{} pulled  {} skipped",
-                pulled, skipped
+                "{} pulled  {} skipped  {} total",
+                pulled, skipped, pulled + skipped
             ));
         }
         Ok::<(), anyhow::Error>(())
