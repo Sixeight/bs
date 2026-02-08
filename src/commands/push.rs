@@ -35,9 +35,9 @@ pub fn run(paths: &[PathBuf], publish: bool) -> Result<()> {
 
         let client = crate::client::HatenaClient::new(&blog_domain, blog_config);
 
-        // Fresh check: only push if local is newer than remote
+        // Fresh check: only push if local is newer than remote (app:edited)
         let remote_entry = client.get_entry_by_url(edit_url)?;
-        if let Ok(remote_time) = OffsetDateTime::parse(&remote_entry.updated, &Iso8601::DEFAULT) {
+        if let Ok(remote_time) = OffsetDateTime::parse(&remote_entry.edited, &Iso8601::DEFAULT) {
             if let Some(local_time) = entry::local_last_modified(path) {
                 if local_time <= remote_time {
                     skipped += 1;

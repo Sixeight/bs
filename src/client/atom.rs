@@ -14,6 +14,7 @@ pub struct Entry {
     pub content: String,
     pub updated: String,
     pub published: String,
+    pub edited: String,
     pub edit_url: Option<String>,
     pub alternate_url: Option<String>,
     pub preview_url: Option<String>,
@@ -30,6 +31,7 @@ enum Tag {
     Content,
     Updated,
     Published,
+    AppEdited,
     AppDraft,
     FormattedContent,
     AuthorName,
@@ -125,6 +127,7 @@ pub fn parse_feed(xml: &str) -> Result<Feed> {
                 b"content" => current_tag = Tag::Content,
                 b"updated" => current_tag = Tag::Updated,
                 b"published" => current_tag = Tag::Published,
+                name if name == b"app:edited" => current_tag = Tag::AppEdited,
                 name if name == b"app:draft" => current_tag = Tag::AppDraft,
                 name if name == b"hatena:formatted-content" => {
                     current_tag = Tag::FormattedContent
@@ -166,6 +169,10 @@ pub fn parse_feed(xml: &str) -> Result<Feed> {
                         }
                         Tag::Published => {
                             entry.published = String::from_utf8(e.into_inner().to_vec())
+                                .unwrap_or_default();
+                        }
+                        Tag::AppEdited => {
+                            entry.edited = String::from_utf8(e.into_inner().to_vec())
                                 .unwrap_or_default();
                         }
                         Tag::AppDraft => {
@@ -279,6 +286,7 @@ mod tests {
     <content type="text/html">Hello World</content>
     <updated>2024-01-01T00:00:00+09:00</updated>
     <published>2024-01-01T00:00:00+09:00</published>
+    <app:edited>2024-02-15T10:30:00+09:00</app:edited>
     <category term="Rust" />
     <category term="Programming" />
     <app:control>
@@ -321,6 +329,7 @@ mod tests {
         assert_eq!(entry.title, "Test Entry");
         assert_eq!(entry.content, "Hello World");
         assert_eq!(entry.updated, "2024-01-01T00:00:00+09:00");
+        assert_eq!(entry.edited, "2024-02-15T10:30:00+09:00");
         assert_eq!(
             entry.edit_url.as_deref(),
             Some("https://blog.hatena.ne.jp/user/blog.example.com/atom/entry/123")

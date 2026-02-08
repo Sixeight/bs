@@ -37,7 +37,7 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
         );
 
         let local_time = entry::local_last_modified(&dest);
-        if let Ok(remote_time) = OffsetDateTime::parse(&updated.date, &Iso8601::DEFAULT) {
+        if let Ok(remote_time) = OffsetDateTime::parse(&updated.edited, &Iso8601::DEFAULT) {
             if let Some(lt) = local_time {
                 if remote_time <= lt {
                     skipped += 1;
@@ -53,7 +53,7 @@ pub fn run(paths: &[PathBuf]) -> Result<()> {
             let local_str = local_time
                 .and_then(|t| t.format(&Iso8601::DEFAULT).ok())
                 .unwrap_or_default();
-            progress::log_fresh(&updated.date, &local_str);
+            progress::log_fresh(&updated.edited, &local_str);
         }
 
         updated.save(&dest)?;

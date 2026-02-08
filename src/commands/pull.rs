@@ -36,7 +36,7 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
 
         for (path, entry) in rx {
             let local_time = entry::local_last_modified(&path);
-            if let Ok(remote_time) = OffsetDateTime::parse(&entry.date, &Iso8601::DEFAULT) {
+            if let Ok(remote_time) = OffsetDateTime::parse(&entry.edited, &Iso8601::DEFAULT) {
                 if let Some(lt) = local_time {
                     if remote_time <= lt {
                         skipped += 1;
@@ -52,7 +52,7 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
                 let local_str = local_time
                     .and_then(|t| t.format(&Iso8601::DEFAULT).ok())
                     .unwrap_or_default();
-                progress::log_fresh(&entry.date, &local_str);
+                progress::log_fresh(&entry.edited, &local_str);
             }
 
             if let Some(parent) = path.parent() {

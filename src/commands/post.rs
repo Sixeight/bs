@@ -22,6 +22,7 @@ pub fn run(
     let entry = LocalEntry {
         title: title.unwrap_or("").to_string(),
         date: String::new(),
+        edited: String::new(),
         url: None,
         edit_url: None,
         preview_url: None,

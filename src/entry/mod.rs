@@ -11,6 +11,7 @@ use crate::client::atom;
 pub struct LocalEntry {
     pub title: String,
     pub date: String,
+    pub edited: String,
     pub url: Option<String>,
     pub edit_url: Option<String>,
     pub preview_url: Option<String>,
@@ -25,6 +26,7 @@ impl LocalEntry {
         Self {
             title: entry.title,
             date: entry.updated,
+            edited: entry.edited,
             url: entry.alternate_url,
             edit_url: entry.edit_url,
             preview_url: entry.preview_url,
@@ -59,6 +61,7 @@ impl LocalEntry {
         Ok(Self {
             title: header.title.unwrap_or_default(),
             date: header.date.unwrap_or_default(),
+            edited: String::new(),
             url: header.url,
             edit_url: header.edit_url,
             preview_url: header.preview_url,
@@ -144,6 +147,7 @@ impl LocalEntry {
             content: self.body.clone(),
             updated: self.date.clone(),
             published: self.date.clone(),
+            edited: String::new(),
             edit_url: self.edit_url.clone(),
             alternate_url: self.url.clone(),
             preview_url: self.preview_url.clone(),
@@ -211,9 +215,9 @@ impl LocalEntry {
         Ok(())
     }
 
-    /// Set file mtime to entry's updated time for accurate fresh checks.
     pub fn set_mtime(&self, path: &Path) {
-        if let Ok(dt) = OffsetDateTime::parse(&self.date, &Iso8601::DEFAULT) {
+        let ts = if self.edited.is_empty() { &self.date } else { &self.edited };
+        if let Ok(dt) = OffsetDateTime::parse(ts, &Iso8601::DEFAULT) {
             let times = std::fs::FileTimes::new()
                 .set_modified(std::time::SystemTime::from(dt));
             if let Ok(file) = std::fs::File::options().write(true).open(path) {
@@ -494,6 +498,7 @@ Draft body";
         let entry = LocalEntry {
             title: "Roundtrip Test".to_string(),
             date: "2024-06-15T10:30:00+09:00".to_string(),
+            edited: String::new(),
             url: Some("https://example.com/entry/2024/06/15/test".to_string()),
             edit_url: Some(
                 "https://blog.hatena.ne.jp/user/example.com/atom/entry/456".to_string(),
@@ -535,6 +540,7 @@ Draft body";
         let entry = LocalEntry {
             title: "Test".to_string(),
             date: String::new(),
+            edited: String::new(),
             url: Some("https://example.com/entry/2024/01/01/test".to_string()),
             edit_url: None,
             preview_url: None,
@@ -557,6 +563,7 @@ Draft body";
         let entry = LocalEntry {
             title: "Test".to_string(),
             date: String::new(),
+            edited: String::new(),
             url: None,
             edit_url: None,
             preview_url: None,
@@ -590,6 +597,7 @@ Draft body";
         let entry = LocalEntry {
             title: "Test".to_string(),
             date: String::new(),
+            edited: String::new(),
             url: Some("https://example.com/entry/2024/01/01/test".to_string()),
             edit_url: None,
             preview_url: None,
@@ -638,6 +646,7 @@ Draft body";
             content: "Atom body\n".to_string(),
             updated: "2024-03-01T12:00:00+09:00".to_string(),
             published: "2024-03-01T12:00:00+09:00".to_string(),
+            edited: "2024-03-01T12:00:00+09:00".to_string(),
             edit_url: Some("https://blog.hatena.ne.jp/user/blog.example.com/atom/entry/789".to_string()),
             alternate_url: Some("https://blog.example.com/entry/2024/03/01/test".to_string()),
             preview_url: None,
@@ -668,6 +677,7 @@ Draft body";
         let entry = LocalEntry {
             title: "Minimal".to_string(),
             date: "2024-01-01".to_string(),
+            edited: String::new(),
             url: None,
             edit_url: None,
             preview_url: None,
@@ -714,6 +724,7 @@ Draft body";
         let entry = LocalEntry {
             title: "File IO Test".to_string(),
             date: "2024-06-01".to_string(),
+            edited: String::new(),
             url: Some("https://example.com/entry/test".to_string()),
             edit_url: None,
             preview_url: None,
@@ -816,6 +827,7 @@ Full body content here.
         let entry = LocalEntry {
             title: "Draft".to_string(),
             date: String::new(),
+            edited: String::new(),
             url: Some("https://example.com/entry/2024/01/15/120000".to_string()),
             edit_url: Some(
                 "https://blog.hatena.ne.jp/user/example.com/atom/entry/456789".to_string(),
@@ -840,6 +852,7 @@ Full body content here.
         let entry = LocalEntry {
             title: "Draft Custom".to_string(),
             date: String::new(),
+            edited: String::new(),
             url: Some("https://example.com/entry/my-post".to_string()),
             edit_url: Some(
                 "https://blog.hatena.ne.jp/user/example.com/atom/entry/789".to_string(),
@@ -864,6 +877,7 @@ Full body content here.
         let entry = LocalEntry {
             title: "Draft".to_string(),
             date: "2024-01-01T00:00:00+09:00".to_string(),
+            edited: String::new(),
             url: Some("https://example.com/entry/2024/01/01/120000".to_string()),
             edit_url: Some("https://blog.hatena.ne.jp/user/example.com/atom/entry/123".to_string()),
             preview_url: None,
@@ -885,6 +899,7 @@ Full body content here.
         let entry = LocalEntry {
             title: "Draft".to_string(),
             date: "2024-01-01T00:00:00+09:00".to_string(),
+            edited: String::new(),
             url: Some("https://example.com/entry/my-post".to_string()),
             edit_url: None,
             preview_url: None,
@@ -905,6 +920,7 @@ Full body content here.
         let entry = LocalEntry {
             title: "Test".to_string(),
             date: "2024-01-01".to_string(),
+            edited: String::new(),
             url: None,
             edit_url: None,
             preview_url: None,
@@ -924,6 +940,7 @@ Full body content here.
         let entry = LocalEntry {
             title: "Test".to_string(),
             date: "2024-01-01".to_string(),
+            edited: String::new(),
             url: None,
             edit_url: None,
             preview_url: None,
@@ -969,6 +986,7 @@ Full body content here.
         let entry = LocalEntry {
             title: " leading space".to_string(),
             date: "2024-01-01".to_string(),
+            edited: String::new(),
             url: None,
             edit_url: None,
             preview_url: None,
@@ -993,6 +1011,7 @@ Full body content here.
         let entry = LocalEntry {
             title: "Mtime Test".to_string(),
             date: "2024-06-15T10:30:00+09:00".to_string(),
+            edited: String::new(),
             url: None,
             edit_url: None,
             preview_url: None,
@@ -1046,6 +1065,7 @@ Full body content here.
         let entry = LocalEntry {
             title: "it's a Re: test".to_string(),
             date: "2024-01-01".to_string(),
+            edited: String::new(),
             url: None,
             edit_url: None,
             preview_url: None,
