@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
+use time::OffsetDateTime;
+use time::format_description::well_known::Iso8601;
 
 use crate::client::atom;
 use crate::client::HatenaClient;
@@ -26,6 +28,26 @@ pub fn run(blogs: &[String], no_drafts: bool, only_drafts: bool) -> Result<()> {
         let mut stderr = std::io::BufWriter::new(std::io::stderr());
         let mut buf = String::with_capacity(8192);
         for (path, entry) in rx {
+            // Fresh check: skip if local file is newer than remote
+            if path.exists() {
+                if let Ok(remote_time) = OffsetDateTime::parse(&entry.date, &Iso8601::DEFAULT) {
+                    if let Ok(local_time) = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .map(OffsetDateTime::from)
+                    {
+                        if remote_time <= local_time {
+                            continue;
+                        }
+                        let _ = writeln!(
+                            stderr,
+                            "       fresh remote={} > local={}",
+                            entry.date,
+                            local_time.format(&Iso8601::DEFAULT).unwrap_or_default()
+                        );
+                    }
+                }
+            }
+
             if let Some(parent) = path.parent() {
                 if created_dirs.insert(parent.to_path_buf()) {
                     std::fs::create_dir_all(parent)
