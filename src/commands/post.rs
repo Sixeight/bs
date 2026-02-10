@@ -12,6 +12,7 @@ pub fn run(
     draft: bool,
     custom_path: Option<&str>,
     page: bool,
+    categories: Vec<String>,
 ) -> Result<()> {
     let config = Config::load(None)?;
     let blog_config = config.get_blog(blog)?;
@@ -27,7 +28,7 @@ pub fn run(
         edit_url: None,
         preview_url: None,
         draft,
-        categories: Vec::new(),
+        categories,
         custom_path: custom_path.map(|s| s.to_string()),
         body,
     };

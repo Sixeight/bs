@@ -61,6 +61,7 @@ echo "本文" | bs post blog.example.com --title "タイトル"
 echo "下書き" | bs post blog.example.com --title "WIP" --draft
 echo "About" | bs post blog.example.com --title "About" --page
 echo "本文" | bs post blog.example.com --custom-path "my-entry"
+echo "本文" | bs post blog.example.com --title "Rust入門" -c rust -c programming
 ```
 
 ### fetch

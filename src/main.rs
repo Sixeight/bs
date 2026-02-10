@@ -81,6 +81,10 @@ enum Commands {
         /// Create as a static page
         #[arg(long)]
         page: bool,
+
+        /// Entry categories
+        #[arg(long, short)]
+        category: Vec<String>,
     },
 
     /// List configured blogs
@@ -124,7 +128,8 @@ fn run() -> Result<()> {
             draft,
             custom_path,
             page,
-        } => commands::post::run(&blog, title.as_deref(), draft, custom_path.as_deref(), page),
+            category,
+        } => commands::post::run(&blog, title.as_deref(), draft, custom_path.as_deref(), page, category),
         Commands::List => commands::list::run(),
         Commands::Remove { paths } => commands::remove::run(&paths),
     }
